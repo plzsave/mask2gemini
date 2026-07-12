@@ -1,0 +1,14 @@
+{
+  "name": "mask2gemini",
+  "private": true,
+  "scripts": {
+    "vendor": "bash scripts/copy-vendor.sh"
+  },
+  "dependencies": {
+    "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
+    "@tesseract.js-data/jpn": "^1.0.0"
+  }
+}

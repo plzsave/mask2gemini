@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>mask2gemini — マスク確認</title>
+  <link rel="stylesheet" href="review.css">
+</head>
+<body>
+  <header class="toolbar">
+    <div class="toolbar-left">
+      <strong>mask2gemini</strong>
+      <span id="status" aria-live="polite">読み込み中…</span>
+    </div>
+    <div class="toolbar-right">
+      <button id="copy-image" disabled>① マスク済み画像をコピー</button>
+      <button id="copy-prompt" disabled>② プロンプトをコピー</button>
+      <button id="open-gemini" disabled>③ Gemini を開く</button>
+    </div>
+  </header>
+  <p class="hint">
+    黒塗りは<strong>クリックで解除</strong>、足りない箇所は<strong>ドラッグで追加</strong>できます。
+    コピーされるのは常にマスク適用後の画像です。Gemini には画像 → プロンプトの順に貼り付けてください。
+  </p>
+  <main class="stage">
+    <canvas id="canvas"></canvas>
+  </main>
+  <script src="vendor/tesseract/tesseract.min.js"></script>
+  <script src="rules.js"></script>
+  <script src="review.js"></script>
+</body>
+</html>
