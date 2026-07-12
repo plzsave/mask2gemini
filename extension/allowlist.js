@@ -5,11 +5,12 @@
 
   const STORAGE_KEY = "userAllowlist";
 
-  // 空白（全角含む）を除去し、全角英数字を半角へ寄せ、小文字化する。
-  // 「山田 太郎」の登録が OCR 上の「山田」「太郎」の並びにも一致するようにするため。
+  // 空白（全角含む）と句読点類を除去し、全角英数字を半角へ寄せ、小文字化する。
+  // 「山田 太郎」の登録が OCR 上の「山田」「太郎」の並びにも、
+  // 「ログイン中:」のような記号付き断片が「ログイン中」にも一致するようにするため。
   const normalizePhrase = (s) =>
     s
-      .replace(/[\s　]+/g, "")
+      .replace(/[\s　:：;；,，.。、()（）[\]「」【】]+/g, "")
       .replace(/[Ａ-Ｚａ-ｚ０-９＠]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
       .toLowerCase();
 
@@ -35,14 +36,19 @@
    * 単語 index の集合を返す。純関数（storage 非依存・テスト可能）。
    *
    * 行内の単語テキストを正規化して連結し、フレーズを部分一致で探す。
-   * 一致した文字範囲に 1 文字でも重なる単語は丸ごと保護する
-   * （境界が単語の途中でも、解除方向にのみ広がるため安全側）。
+   * 保護の粒度は fullCoverage で切り替える:
+   * - false（既定・ユーザー登録向け）: 一致範囲に 1 文字でも重なる単語を保護する。
+   *   本人が明示登録した語なので、境界のずれより解除意図を優先する
+   * - true（組み込みラベル辞書向け）: 単語の全文字が一致範囲で覆われている場合のみ
+   *   保護する。「会社」がデータ中の社名（株式会社◯◯）へ部分一致して
+   *   周辺の断片まで解除してしまうのを防ぐ
    *
    * @param {{text: string}[]} words
    * @param {string[]} phrases
+   * @param {{fullCoverage?: boolean}} [opts]
    * @returns {Set<number>}
    */
-  function findProtectedWordIndices(words, phrases) {
+  function findProtectedWordIndices(words, phrases, { fullCoverage = false } = {}) {
     const result = new Set();
     const normWords = words.map((w) => normalizePhrase(w.text));
     const joined = normWords.join("");
@@ -54,6 +60,7 @@
       for (let k = 0; k < t.length; k++) owner.push(i);
     });
 
+    const covered = new Array(joined.length).fill(false);
     for (const raw of phrases) {
       const phrase = normalizePhrase(raw);
       if (!phrase) continue;
@@ -61,10 +68,19 @@
       for (;;) {
         const at = joined.indexOf(phrase, from);
         if (at === -1) break;
-        for (let k = at; k < at + phrase.length; k++) result.add(owner[k]);
+        for (let k = at; k < at + phrase.length; k++) covered[k] = true;
         from = at + 1;
       }
     }
+
+    let pos = 0;
+    normWords.forEach((t, i) => {
+      const chars = covered.slice(pos, pos + t.length);
+      pos += t.length;
+      if (t.length === 0) return; // 記号のみの単語は判定不能なので保護しない
+      const hit = fullCoverage ? chars.every(Boolean) : chars.some(Boolean);
+      if (hit) result.add(i);
+    });
     return result;
   }
 

@@ -76,16 +76,23 @@
 
     // ユーザーホワイトリスト（自動ルールより優先。行単位のフレーズ照合）
     const userTerms = await globalThis.Mask2GeminiAllowlist.load();
+    // 組み込み UI ラベル辞書にも同じフレーズ照合を使う。
+    // OCR が「メール|アドレス」「保|存」のように語彙と違う単位に分割しても一致させるため
+    const labelTerms = [...globalThis.Mask2GeminiRules.UI_LABEL_ALLOWLIST];
+    const { findProtectedWordIndices } = globalThis.Mask2GeminiAllowlist;
 
     for (const block of data.blocks ?? []) {
       for (const para of block.paragraphs) {
         for (const line of para.lines) {
-          const protectedIdx =
-            globalThis.Mask2GeminiAllowlist.findProtectedWordIndices(line.words, userTerms);
+          const userProtected = findProtectedWordIndices(line.words, userTerms);
+          const labelProtected =
+            findProtectedWordIndices(line.words, labelTerms, { fullCoverage: true });
           line.words.forEach((word, i) => {
-            if (protectedIdx.has(i)) return;
+            if (userProtected.has(i)) return; // ユーザー登録は無条件で勝つ
             const { mask, reason } = judge(word.text);
             if (!mask) return;
+            // ラベル辞書による保護は、数字や @ を含む語（データの可能性が高い）には効かせない
+            if (labelProtected.has(i) && reason !== "digit" && reason !== "at-mark") return;
             const { x0, y0, x1, y1 } = word.bbox;
             masks.push({
               x: x0 - MASK_PADDING,
