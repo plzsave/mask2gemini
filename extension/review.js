@@ -2,12 +2,14 @@
 (async () => {
   "use strict";
 
-  const { judge } = globalThis.Mask2GeminiRules;
+  const { judge, judgeToken } = globalThis.Mask2GeminiRules;
 
   // 単語 bbox の外側に足す余白 (px)。文字の欠け対策で広めに塗る
   const MASK_PADDING = 3;
   // UI スクリーンショットは文字がまばらなので SPARSE_TEXT を使う
   const PAGE_SEG_MODE = Tesseract.PSM.SPARSE_TEXT;
+  // OCR 前に画像を拡大すると認識精度が大きく上がる（tesseract.js 同梱ドキュメント推奨）
+  const OCR_SCALE = 2;
 
   const statusEl = document.getElementById("status");
   const canvas = document.getElementById("canvas");
@@ -53,6 +55,27 @@
   }
   render();
 
+  // ---- 形態素解析器（kuromoji）の読み込み ----
+  // OCR の単語分割は日本語の語彙単位と一致しないため、判定は形態素トークン単位で行う。
+  // 読み込み失敗時は null を返し、OCR 単語単位の判定にフォールバックする。
+  const tokenizerPromise = new Promise((resolve) => {
+    try {
+      // dicPath は相対パスで渡す。kuromoji は内部で path.join を使うため、
+      // chrome-extension:// の絶対 URL を渡すと `//` が潰れて壊れる
+      kuromoji.builder({ dicPath: "vendor/kuromoji/dict" }).build((err, tokenizer) => {
+        if (err) {
+          console.warn("kuromoji の読み込みに失敗。OCR 単語単位で判定します", err);
+          resolve(null);
+        } else {
+          resolve(tokenizer);
+        }
+      });
+    } catch (e) {
+      console.warn("kuromoji の初期化に失敗。OCR 単語単位で判定します", e);
+      resolve(null);
+    }
+  });
+
   // ---- OCR → 自動マスク ----
   setStatus("OCR エンジンを起動中…");
   const vendorUrl = (p) => chrome.runtime.getURL(`vendor/${p}`);
@@ -69,39 +92,87 @@
     },
   });
 
+  // 1 行分の OCR 結果を判定単位の列に変換する。
+  // tokenizer があれば行テキストを形態素解析し、文字 (symbol) の bbox から
+  // トークン単位の矩形を組み立てる。無ければ OCR の単語単位のまま返す。
+  function lineToUnits(line, tokenizer) {
+    if (!tokenizer) {
+      return line.words.map((w) => ({ text: w.text, bbox: w.bbox, token: null }));
+    }
+    const symbols = line.words.flatMap((w) => w.symbols ?? []);
+    const lineText = symbols.map((s) => s.text).join("");
+    if (lineText.length === 0) {
+      return line.words.map((w) => ({ text: w.text, bbox: w.bbox, token: null }));
+    }
+    // 行テキストの文字位置 → symbol index の対応表（symbol が複数文字の場合に備える）
+    const owner = [];
+    symbols.forEach((s, i) => {
+      for (let k = 0; k < s.text.length; k++) owner.push(i);
+    });
+    const units = [];
+    for (const token of tokenizer.tokenize(lineText)) {
+      const start = token.word_position - 1; // word_position は 1 始まり
+      const end = Math.min(start + token.surface_form.length, owner.length);
+      if (start >= end) continue;
+      const ss = symbols.slice(owner[start], owner[end - 1] + 1);
+      units.push({
+        text: token.surface_form,
+        token,
+        bbox: {
+          x0: Math.min(...ss.map((s) => s.bbox.x0)),
+          y0: Math.min(...ss.map((s) => s.bbox.y0)),
+          x1: Math.max(...ss.map((s) => s.bbox.x1)),
+          y1: Math.max(...ss.map((s) => s.bbox.y1)),
+        },
+      });
+    }
+    return units;
+  }
+
   try {
     await worker.setParameters({ tessedit_pageseg_mode: PAGE_SEG_MODE });
     setStatus("文字を読み取り中…");
-    const { data } = await worker.recognize(capture.dataUrl, {}, { blocks: true });
+
+    // 認識精度向上のため拡大してから OCR にかける（座標は後で OCR_SCALE で割り戻す）
+    const upscaled = document.createElement("canvas");
+    upscaled.width = image.naturalWidth * OCR_SCALE;
+    upscaled.height = image.naturalHeight * OCR_SCALE;
+    upscaled.getContext("2d").drawImage(image, 0, 0, upscaled.width, upscaled.height);
+
+    const { data } = await worker.recognize(upscaled, {}, { blocks: true });
+
+    setStatus("マスク位置を計算中…");
+    const tokenizer = await tokenizerPromise;
 
     // ユーザーホワイトリスト（自動ルールより優先。行単位のフレーズ照合）
     const userTerms = await globalThis.Mask2GeminiAllowlist.load();
     // 組み込み UI ラベル辞書にも同じフレーズ照合を使う。
-    // OCR が「メール|アドレス」「保|存」のように語彙と違う単位に分割しても一致させるため
+    // 分割が語彙と食い違っても（「メール|アドレス」「保|存」）一致させるため
     const labelTerms = [...globalThis.Mask2GeminiRules.UI_LABEL_ALLOWLIST];
     const { findProtectedWordIndices } = globalThis.Mask2GeminiAllowlist;
 
     for (const block of data.blocks ?? []) {
       for (const para of block.paragraphs) {
         for (const line of para.lines) {
-          const userProtected = findProtectedWordIndices(line.words, userTerms);
+          const units = lineToUnits(line, tokenizer);
+          const userProtected = findProtectedWordIndices(units, userTerms);
           const labelProtected =
-            findProtectedWordIndices(line.words, labelTerms, { fullCoverage: true });
-          line.words.forEach((word, i) => {
+            findProtectedWordIndices(units, labelTerms, { fullCoverage: true });
+          units.forEach((unit, i) => {
             if (userProtected.has(i)) return; // ユーザー登録は無条件で勝つ
-            const { mask, reason } = judge(word.text);
+            const { mask, reason } = unit.token ? judgeToken(unit.token) : judge(unit.text);
             if (!mask) return;
             // ラベル辞書による保護は、数字や @ を含む語（データの可能性が高い）には効かせない
             if (labelProtected.has(i) && reason !== "digit" && reason !== "at-mark") return;
-            const { x0, y0, x1, y1 } = word.bbox;
+            const { x0, y0, x1, y1 } = unit.bbox;
             masks.push({
-              x: x0 - MASK_PADDING,
-              y: y0 - MASK_PADDING,
-              w: x1 - x0 + MASK_PADDING * 2,
-              h: y1 - y0 + MASK_PADDING * 2,
+              x: x0 / OCR_SCALE - MASK_PADDING,
+              y: y0 / OCR_SCALE - MASK_PADDING,
+              w: (x1 - x0) / OCR_SCALE + MASK_PADDING * 2,
+              h: (y1 - y0) / OCR_SCALE + MASK_PADDING * 2,
               source: "auto",
               reason,
-              text: word.text,
+              text: unit.text,
             });
           });
         }

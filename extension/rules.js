@@ -73,5 +73,38 @@
     return { mask: true, reason: "unknown" };
   }
 
-  globalThis.Mask2GeminiRules = { judge, LONG_TEXT_THRESHOLD, UI_LABEL_ALLOWLIST };
+  /**
+   * 形態素解析トークン（kuromoji IPADIC 形式）を塗るべきか判定する。
+   * judge() と違い品詞情報を使えるため、辞書登録なしで固有名詞（人名・組織・地名）を
+   * 検出できる。単位が言語的に正しい前提なので judge() より精密。
+   * @param {{surface_form: string, pos: string, pos_detail_1: string, word_type: string}} token
+   * @returns {{mask: boolean, reason: string}}
+   */
+  function judgeToken(token) {
+    const surface = token.surface_form;
+    const text = normalize(surface);
+    if (text.length === 0) return { mask: false, reason: "empty" };
+
+    for (const { re, reason } of BLOCK_PATTERNS) {
+      if (re.test(text)) return { mask: true, reason };
+    }
+    if (text.length >= LONG_TEXT_THRESHOLD) return { mask: true, reason: "long-text" };
+    if (UI_LABEL_ALLOWLIST.has(text)) return { mask: false, reason: "allowlist" };
+
+    if (token.pos === "名詞" && token.pos_detail_1 === "固有名詞") {
+      return { mask: true, reason: "proper-noun" };
+    }
+    if (token.pos === "名詞" && token.pos_detail_1 === "数") {
+      return { mask: true, reason: "number" }; // 漢数字等（算用数字は digit で先に落ちる）
+    }
+    if (token.word_type === "UNKNOWN") {
+      // 辞書に無い語は名前・ID・造語の可能性が高いので塗る。ただし記号（罫線等）は残す
+      if (token.pos === "記号") return { mask: false, reason: "symbol" };
+      return { mask: true, reason: "unknown-token" };
+    }
+    // 辞書に載っている一般語（一般名詞・動詞・助詞など）は残す
+    return { mask: false, reason: `pos:${token.pos}` };
+  }
+
+  globalThis.Mask2GeminiRules = { judge, judgeToken, LONG_TEXT_THRESHOLD, UI_LABEL_ALLOWLIST };
 })();

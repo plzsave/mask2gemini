@@ -24,5 +24,10 @@ cp "$nm"/tesseract.js-core/tesseract-core*.wasm "$vendor/core/"
 cp "$nm/@tesseract.js-data/jpn/4.0.0_best_int/jpn.traineddata.gz" "$vendor/lang/"
 cp "$nm/@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz" "$vendor/lang/"
 
+# 形態素解析（kuromoji.js: ブラウザ用ビルドと IPADIC 辞書）
+mkdir -p "$vendor/kuromoji/dict"
+cp "$nm/kuromoji/build/kuromoji.js" "$vendor/kuromoji/"
+cp "$nm"/kuromoji/dict/*.dat.gz "$vendor/kuromoji/dict/"
+
 echo "vendor 生成完了:"
 du -sh "$vendor"/* | sed "s|$root/||"

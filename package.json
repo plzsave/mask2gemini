@@ -5,6 +5,7 @@
     "vendor": "bash scripts/copy-vendor.sh"
   },
   "dependencies": {
+    "kuromoji": "^0.1.2",
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
