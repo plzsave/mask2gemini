@@ -10,6 +10,10 @@
   const PAGE_SEG_MODE = Tesseract.PSM.SPARSE_TEXT;
   // OCR 前に画像を拡大すると認識精度が大きく上がる（tesseract.js 同梱ドキュメント推奨）
   const OCR_SCALE = 2;
+  // OCR 信頼度がこの値未満の非データ語はマスクしない。ボタン枠線・罫線が
+  // 「巡」「昌」等の文字として誤認識される（confidence ≒ 0。実文字は 90 前後）
+  // のを除外するため。数字・@ を含む語は信頼度が低くても塗る（安全側）
+  const NOISE_CONFIDENCE = 35;
 
   const statusEl = document.getElementById("status");
   const canvas = document.getElementById("canvas");
@@ -97,12 +101,19 @@
   // トークン単位の矩形を組み立てる。無ければ OCR の単語単位のまま返す。
   function lineToUnits(line, tokenizer) {
     if (!tokenizer) {
-      return line.words.map((w) => ({ text: w.text, bbox: w.bbox, token: null }));
+      return line.words.map((w) => ({
+        text: w.text, bbox: w.bbox, token: null, confidence: w.confidence,
+      }));
     }
-    const symbols = line.words.flatMap((w) => w.symbols ?? []);
+    // 信頼度は word のものを使う（枠線等のノイズは word confidence が 0 になる。
+    // symbol の confidence はノイズでも 70 以上になり判別に使えない）
+    const symbols = line.words.flatMap((w) =>
+      (w.symbols ?? []).map((s) => ({ text: s.text, bbox: s.bbox, wordConfidence: w.confidence })));
     const lineText = symbols.map((s) => s.text).join("");
     if (lineText.length === 0) {
-      return line.words.map((w) => ({ text: w.text, bbox: w.bbox, token: null }));
+      return line.words.map((w) => ({
+        text: w.text, bbox: w.bbox, token: null, confidence: w.confidence,
+      }));
     }
     // 行テキストの文字位置 → symbol index の対応表（symbol が複数文字の場合に備える）
     const owner = [];
@@ -118,6 +129,7 @@
       units.push({
         text: token.surface_form,
         token,
+        confidence: Math.min(...ss.map((s) => s.wordConfidence)),
         bbox: {
           x0: Math.min(...ss.map((s) => s.bbox.x0)),
           y0: Math.min(...ss.map((s) => s.bbox.y0)),
@@ -158,12 +170,21 @@
           const userProtected = findProtectedWordIndices(units, userTerms);
           const labelProtected =
             findProtectedWordIndices(units, labelTerms, { fullCoverage: true });
+          const decisions = [];
           units.forEach((unit, i) => {
-            if (userProtected.has(i)) return; // ユーザー登録は無条件で勝つ
+            const decide = (verdict) => decisions.push(`${unit.text}=${verdict}`);
+            if (userProtected.has(i)) return decide("残:user"); // ユーザー登録は無条件で勝つ
             const { mask, reason } = unit.token ? judgeToken(unit.token) : judge(unit.text);
-            if (!mask) return;
+            if (!mask) return decide(`残:${reason}`);
             // ラベル辞書による保護は、数字や @ を含む語（データの可能性が高い）には効かせない
-            if (labelProtected.has(i) && reason !== "digit" && reason !== "at-mark") return;
+            if (labelProtected.has(i) && reason !== "digit" && reason !== "at-mark") {
+              return decide("残:label");
+            }
+            // 信頼度ほぼゼロの非データ語は UI 部品（枠線・罫線）の誤認識なので塗らない
+            if (unit.confidence < NOISE_CONFIDENCE && reason !== "digit" && reason !== "at-mark") {
+              return decide(`残:noise(${Math.round(unit.confidence)})`);
+            }
+            decide(`塗:${reason}`);
             const { x0, y0, x1, y1 } = unit.bbox;
             masks.push({
               x: x0 / OCR_SCALE - MASK_PADDING,
@@ -175,6 +196,8 @@
               text: unit.text,
             });
           });
+          // 塗りすぎ・塗り漏れ調査用。確認画面の DevTools コンソールで確認できる
+          console.debug("[mask2gemini]", decisions.join(" | "));
         }
       }
     }

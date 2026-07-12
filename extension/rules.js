@@ -88,6 +88,9 @@
     for (const { re, reason } of BLOCK_PATTERNS) {
       if (re.test(text)) return { mask: true, reason };
     }
+    // 記号のみのトークン（| : - . 等）は罫線・区切りの類なので塗らない
+    // （@ や数字は上の BLOCK_PATTERNS が先に拾う）
+    if (/^[^\p{L}\p{N}]+$/u.test(text)) return { mask: false, reason: "punct" };
     if (text.length >= LONG_TEXT_THRESHOLD) return { mask: true, reason: "long-text" };
     if (UI_LABEL_ALLOWLIST.has(text)) return { mask: false, reason: "allowlist" };
 
