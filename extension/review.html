@@ -10,11 +10,13 @@
     <div class="toolbar-left">
       <strong>mask2gemini</strong>
       <span id="status" aria-live="polite">読み込み中…</span>
+      <span id="register-zone"></span>
     </div>
     <div class="toolbar-right">
       <button id="copy-image" disabled>① マスク済み画像をコピー</button>
       <button id="copy-prompt" disabled>② プロンプトをコピー</button>
       <button id="open-gemini" disabled>③ Gemini を開く</button>
+      <button id="open-options" title="ホワイトリスト設定">設定</button>
     </div>
   </header>
   <p class="hint">
@@ -26,6 +28,7 @@
   </main>
   <script src="vendor/tesseract/tesseract.min.js"></script>
   <script src="rules.js"></script>
+  <script src="allowlist.js"></script>
   <script src="review.js"></script>
 </body>
 </html>

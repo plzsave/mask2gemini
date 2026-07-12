@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>mask2gemini 設定</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <h1>マスクしない語句（ホワイトリスト）</h1>
+  <p class="hint">
+    ここに登録した語句は自動マスクの対象から外れます（自動ルールより優先）。
+    自社名や、出しても問題ない自分の名前などを登録してください。
+    照合は空白を無視します（「山田 太郎」は「山田太郎」にも一致）。
+  </p>
+
+  <form id="add-form">
+    <input id="term" type="text" placeholder="例: 株式会社ABC" autocomplete="off">
+    <button type="submit">追加</button>
+  </form>
+
+  <ul id="list" aria-label="登録済みの語句"></ul>
+
+  <div class="io">
+    <button id="export" type="button">JSON をエクスポート</button>
+    <label class="import-label">
+      JSON をインポート<input id="import" type="file" accept=".json,application/json" hidden>
+    </label>
+  </div>
+  <p class="hint">
+    チーム共有: エクスポートした JSON を共有リポジトリや共有ドライブに置き、
+    各メンバーがインポートしてください（既存の登録に追記されます）。
+  </p>
+
+  <p id="msg" aria-live="polite"></p>
+
+  <script src="allowlist.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

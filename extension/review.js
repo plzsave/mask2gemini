@@ -18,6 +18,10 @@
 
   const setStatus = (text) => { statusEl.textContent = text; };
 
+  document.getElementById("open-options").addEventListener("click", () => {
+    chrome.runtime.openOptionsPage();
+  });
+
   // ---- 撮影データの取得 ----
   const { capture, captureError } = await chrome.storage.session.get(["capture", "captureError"]);
   if (!capture) {
@@ -70,12 +74,18 @@
     setStatus("文字を読み取り中…");
     const { data } = await worker.recognize(capture.dataUrl, {}, { blocks: true });
 
+    // ユーザーホワイトリスト（自動ルールより優先。行単位のフレーズ照合）
+    const userTerms = await globalThis.Mask2GeminiAllowlist.load();
+
     for (const block of data.blocks ?? []) {
       for (const para of block.paragraphs) {
         for (const line of para.lines) {
-          for (const word of line.words) {
+          const protectedIdx =
+            globalThis.Mask2GeminiAllowlist.findProtectedWordIndices(line.words, userTerms);
+          line.words.forEach((word, i) => {
+            if (protectedIdx.has(i)) return;
             const { mask, reason } = judge(word.text);
-            if (!mask) continue;
+            if (!mask) return;
             const { x0, y0, x1, y1 } = word.bbox;
             masks.push({
               x: x0 - MASK_PADDING,
@@ -84,8 +94,9 @@
               h: y1 - y0 + MASK_PADDING * 2,
               source: "auto",
               reason,
+              text: word.text,
             });
-          }
+          });
         }
       }
     }
@@ -136,6 +147,7 @@
         const m = masks[i];
         if (cur.x >= m.x && cur.x <= m.x + m.w && cur.y >= m.y && cur.y <= m.y + m.h) {
           masks.splice(i, 1);
+          if (m.source === "auto" && m.text) offerAllowlistRegistration(m.text);
           break;
         }
       }
@@ -147,6 +159,19 @@
     render();
     setStatus(`マスク ${masks.length} 件`);
   });
+
+  // ---- ホワイトリスト登録導線（自動マスクの解除時に提示） ----
+  const registerZone = document.getElementById("register-zone");
+  function offerAllowlistRegistration(text) {
+    const btn = document.createElement("button");
+    btn.textContent = `「${text}」を次回からマスクしない`;
+    btn.addEventListener("click", async () => {
+      await globalThis.Mask2GeminiAllowlist.add(text);
+      registerZone.replaceChildren();
+      setStatus(`「${text}」をホワイトリストに登録しました（設定画面で編集できます）`);
+    });
+    registerZone.replaceChildren(btn); // 提示は常に最新の 1 件だけ
+  }
 
   // ---- 出力 ----
   const PROMPT_TEMPLATE = [

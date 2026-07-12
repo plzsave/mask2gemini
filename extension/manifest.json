@@ -1,13 +1,17 @@
 {
   "manifest_version": 3,
   "name": "mask2gemini",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "スクリーンショットをOCR＋決定的ルールでマスクし、Geminiに渡す前処理を行う",
   "action": {
     "default_title": "この画面を撮ってマスクする"
   },
   "background": {
     "service_worker": "background.js"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
   },
   "permissions": ["activeTab", "storage", "clipboardWrite"],
   "content_security_policy": {
