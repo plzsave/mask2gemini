@@ -15,7 +15,7 @@ out="$root/dist/mask2gemini-$version.zip"
 
 mkdir -p "$root/dist"
 rm -f "$out"
-(cd "$root" && zip -qr "$out" extension)
+(cd "$root" && zip -qr "$out" extension LICENSE)
 
 echo "生成完了: ${out#"$root/"}"
 du -h "$out" | cut -f1

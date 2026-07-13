@@ -29,5 +29,22 @@ mkdir -p "$vendor/kuromoji/dict"
 cp "$nm/kuromoji/build/kuromoji.js" "$vendor/kuromoji/"
 cp "$nm"/kuromoji/dict/*.dat.gz "$vendor/kuromoji/dict/"
 
+# 再頒布物なので各ライブラリの LICENSE / NOTICE を同梱する
+cp "$nm/tesseract.js/LICENSE.md" "$vendor/tesseract/"
+cp "$nm/tesseract.js-core/LICENSE" "$vendor/core/"
+cp "$nm/kuromoji/LICENSE-2.0.txt" "$nm/kuromoji/NOTICE.md" "$vendor/kuromoji/"
+
+# 同梱パッケージの一覧（名前・バージョン・ライセンス）を package.json から生成
+node -e '
+  const pkgs = ["tesseract.js", "tesseract.js-core",
+    "@tesseract.js-data/jpn", "@tesseract.js-data/eng", "kuromoji"];
+  const lines = pkgs.map((p) => {
+    const j = require(process.argv[1] + "/" + p + "/package.json");
+    const repo = (j.repository?.url ?? "").replace(/^git\+/, "").replace(/\.git$/, "");
+    return `- ${j.name}@${j.version} (${j.license}) ${repo}`;
+  });
+  console.log(["This distribution bundles the following third-party packages:", "", ...lines].join("\n"));
+' "$nm" > "$vendor/THIRD-PARTY-NOTICES.txt"
+
 echo "vendor 生成完了:"
 du -sh "$vendor"/* | sed "s|$root/||"
