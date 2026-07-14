@@ -49,11 +49,12 @@
   }
 
   /**
-   * 1 段落（paragraph）分の判定単位列から、マスクすべき矩形と判定ログを算出する。
-   * 段落全体を結合して判定するのは、折り返しで視覚的に複数の OCR 行へまたがる
-   * メールアドレス等を取りこぼさないため（review.js 側で段落単位に units を作る）。
+   * まとまった判定単位列（1ブロック分など）から、マスクすべき矩形と判定ログを
+   * 算出する。関数自体は units の粒度に依存しない。呼び出し側（review.js）が
+   * 折り返しで複数の OCR 行/段落にまたがるメールアドレス等を取りこぼさないよう
+   * 十分広い範囲（現状はブロック単位。Issue #6）で units を連結して渡す。
    *
-   * @param {object[]} units lineToUnits() の出力を段落内で連結したもの
+   * @param {object[]} units lineToUnits() の出力を連結したもの
    * @param {object} deps
    * @param {(text: string) => {mask: boolean, reason: string}} deps.judge
    * @param {(token: object) => {mask: boolean, reason: string}} deps.judgeToken

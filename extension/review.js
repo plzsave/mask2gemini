@@ -120,22 +120,25 @@
     const { findProtectedWordIndices } = globalThis.Mask2GeminiAllowlist;
 
     for (const block of data.blocks ?? []) {
-      for (const para of block.paragraphs) {
-        // メールアドレス等は、折り返しで視覚的に複数の OCR 行へまたがることがある
-        // （例: 狭い列幅で word-break: break-all のように途中改行される）。
-        // Tesseract の行単位のままだと "@" と本体が別行に分かれて塗り漏れるため、
-        // パターン照合・アローリスト照合は段落（paragraph）全体を結合して行う。
-        // 判定単位（unit）自体は元の OCR 行ごとの bbox を保持したまま使う。
-        const units = para.lines.flatMap((line) => lineToUnits(line, tokenizer));
-        const { masks: paraMasks, decisions } = decideParagraphMasks(units, {
-          judge, judgeToken, findLinePatternMaskIndices, findProtectedWordIndices,
-          userTerms, labelTerms,
-          noiseConfidence: NOISE_CONFIDENCE, ocrScale: OCR_SCALE, maskPadding: MASK_PADDING,
-        });
-        masks.push(...paraMasks);
-        // 塗りすぎ・塗り漏れ調査用。確認画面の DevTools コンソールで確認できる
-        console.debug("[mask2gemini]", decisions.join(" | "));
-      }
+      // メールアドレス等は、折り返しで視覚的に複数の OCR 行へまたがることがある
+      // （例: 狭い列幅で word-break: break-all のように途中改行される）。
+      // Tesseract は行だけでなく段落(paragraph)の境界でもこうした折り返しを
+      // 分割することがあり（Issue #6）、段落単位の結合では救えないケースが
+      // 残ったため、パターン照合・アローリスト照合はブロック(block)全体を
+      // 結合して行う。判定単位（unit）自体は元の OCR 行ごとの bbox を保持したまま使う。
+      // recall 優先方針（SPEC.md 確定事項2）のもと、結合範囲が広がることで
+      // 無関係なテキスト同士が偶然パターンに一致するリスクより、断片の
+      // 塗り漏れを防ぐことを優先する
+      const units = block.paragraphs.flatMap((para) =>
+        para.lines.flatMap((line) => lineToUnits(line, tokenizer)));
+      const { masks: blockMasks, decisions } = decideParagraphMasks(units, {
+        judge, judgeToken, findLinePatternMaskIndices, findProtectedWordIndices,
+        userTerms, labelTerms,
+        noiseConfidence: NOISE_CONFIDENCE, ocrScale: OCR_SCALE, maskPadding: MASK_PADDING,
+      });
+      masks.push(...blockMasks);
+      // 塗りすぎ・塗り漏れ調査用。確認画面の DevTools コンソールで確認できる
+      console.debug("[mask2gemini]", decisions.join(" | "));
     }
     render();
     setStatus(`自動マスク ${masks.length} 件。目視で確認し、過不足を直してください。`);

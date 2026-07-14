@@ -40,6 +40,16 @@ test("judgeToken: 固有名詞は塗る", () => {
   assert.deepEqual(judgeToken(token), { mask: true, reason: "proper-noun" });
 });
 
+test("judgeToken: 住所の行政区画接尾辞（都道府県市区町村郡）は一般名詞判定でも塗る", () => {
+  // kuromoji は「東京都」を固有名詞「東京」+ 一般名詞「都」に分割する（Issue #5）
+  for (const suffix of ["都", "道", "府", "県", "市", "区", "町", "村", "郡"]) {
+    const token = { surface_form: suffix, pos: "名詞", pos_detail_1: "一般", word_type: "KNOWN" };
+    assert.deepEqual(
+      judgeToken(token), { mask: true, reason: "address-suffix" },
+      `"${suffix}" が塗られていること`);
+  }
+});
+
 test("judgeToken: 記号のみのトークンは残す", () => {
   const token = { surface_form: "-", pos: "記号", pos_detail_1: "*", word_type: "UNKNOWN" };
   assert.equal(judgeToken(token).mask, false);

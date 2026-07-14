@@ -42,6 +42,12 @@
   const ASCII_WORD = /^[A-Za-z][A-Za-z.'-]*$/;
   const ASCII_KEEP_MAX_LEN = 3;
 
+  // 住所の行政区画接尾辞（1文字）。kuromoji は「東京都」を固有名詞「東京」+
+  // 一般名詞「都」に分割するため、judgeToken() の固有名詞判定だけでは
+  // この1文字が住所の途中の塗り漏れとして残ってしまう（Issue #5）。
+  // 単体で出現した場合のみ対象（複合語の一部として塗られる場合は影響しない）
+  const ADDRESS_SUFFIX = new Set(["都", "道", "府", "県", "市", "区", "町", "村", "郡"]);
+
   const normalize = (raw) =>
     raw
       .trim()
@@ -140,6 +146,10 @@
     if (/^[^\p{L}\p{N}]+$/u.test(text)) return { mask: false, reason: "punct" };
     if (text.length >= LONG_TEXT_THRESHOLD) return { mask: true, reason: "long-text" };
     if (UI_LABEL_ALLOWLIST.has(text)) return { mask: false, reason: "allowlist" };
+    // 住所の行政区画接尾辞（都道府県市区町村郡）は kuromoji 上「一般名詞」に
+    // 分類され、固有名詞判定だけでは拾えない（Issue #5）。単体トークンとして
+    // 出現した場合はここで塗る
+    if (ADDRESS_SUFFIX.has(surface)) return { mask: true, reason: "address-suffix" };
     // ASCII のみの短い語（OK / ID / FAX 等）は judge() と同じ基準で残す。
     // 英語は IPADIC に無く word_type が UNKNOWN になりがちで、この救済が無いと
     // proper-noun/unknown-token 判定より先に短い実用語まで塗ってしまう
