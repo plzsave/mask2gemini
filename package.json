@@ -2,13 +2,16 @@
   "name": "mask2gemini",
   "private": true,
   "scripts": {
-    "vendor": "bash scripts/copy-vendor.sh"
+    "vendor": "bash scripts/copy-vendor.sh",
+    "test": "bun test extension/*.test.js",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "kuromoji": "^0.1.2",
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tesseract.js-data/eng": "^1.0.0",
     "@tesseract.js-data/jpn": "^1.0.0"
   }

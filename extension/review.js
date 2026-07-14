@@ -2,7 +2,8 @@
 (async () => {
   "use strict";
 
-  const { judge, judgeToken } = globalThis.Mask2GeminiRules;
+  const { judge, judgeToken, findLinePatternMaskIndices } = globalThis.Mask2GeminiRules;
+  const { lineToUnits, decideParagraphMasks } = globalThis.Mask2GeminiMaskDecider;
 
   // 単語 bbox の外側に足す余白 (px)。文字の欠け対策で広めに塗る
   const MASK_PADDING = 3;
@@ -96,51 +97,6 @@
     },
   });
 
-  // 1 行分の OCR 結果を判定単位の列に変換する。
-  // tokenizer があれば行テキストを形態素解析し、文字 (symbol) の bbox から
-  // トークン単位の矩形を組み立てる。無ければ OCR の単語単位のまま返す。
-  function lineToUnits(line, tokenizer) {
-    if (!tokenizer) {
-      return line.words.map((w) => ({
-        text: w.text, bbox: w.bbox, token: null, confidence: w.confidence,
-      }));
-    }
-    // 信頼度は word のものを使う（枠線等のノイズは word confidence が 0 になる。
-    // symbol の confidence はノイズでも 70 以上になり判別に使えない）
-    const symbols = line.words.flatMap((w) =>
-      (w.symbols ?? []).map((s) => ({ text: s.text, bbox: s.bbox, wordConfidence: w.confidence })));
-    const lineText = symbols.map((s) => s.text).join("");
-    if (lineText.length === 0) {
-      return line.words.map((w) => ({
-        text: w.text, bbox: w.bbox, token: null, confidence: w.confidence,
-      }));
-    }
-    // 行テキストの文字位置 → symbol index の対応表（symbol が複数文字の場合に備える）
-    const owner = [];
-    symbols.forEach((s, i) => {
-      for (let k = 0; k < s.text.length; k++) owner.push(i);
-    });
-    const units = [];
-    for (const token of tokenizer.tokenize(lineText)) {
-      const start = token.word_position - 1; // word_position は 1 始まり
-      const end = Math.min(start + token.surface_form.length, owner.length);
-      if (start >= end) continue;
-      const ss = symbols.slice(owner[start], owner[end - 1] + 1);
-      units.push({
-        text: token.surface_form,
-        token,
-        confidence: Math.min(...ss.map((s) => s.wordConfidence)),
-        bbox: {
-          x0: Math.min(...ss.map((s) => s.bbox.x0)),
-          y0: Math.min(...ss.map((s) => s.bbox.y0)),
-          x1: Math.max(...ss.map((s) => s.bbox.x1)),
-          y1: Math.max(...ss.map((s) => s.bbox.y1)),
-        },
-      });
-    }
-    return units;
-  }
-
   try {
     await worker.setParameters({ tessedit_pageseg_mode: PAGE_SEG_MODE });
     setStatus("文字を読み取り中…");
@@ -165,40 +121,20 @@
 
     for (const block of data.blocks ?? []) {
       for (const para of block.paragraphs) {
-        for (const line of para.lines) {
-          const units = lineToUnits(line, tokenizer);
-          const userProtected = findProtectedWordIndices(units, userTerms);
-          const labelProtected =
-            findProtectedWordIndices(units, labelTerms, { fullCoverage: true });
-          const decisions = [];
-          units.forEach((unit, i) => {
-            const decide = (verdict) => decisions.push(`${unit.text}=${verdict}`);
-            if (userProtected.has(i)) return decide("残:user"); // ユーザー登録は無条件で勝つ
-            const { mask, reason } = unit.token ? judgeToken(unit.token) : judge(unit.text);
-            if (!mask) return decide(`残:${reason}`);
-            // ラベル辞書による保護は、数字や @ を含む語（データの可能性が高い）には効かせない
-            if (labelProtected.has(i) && reason !== "digit" && reason !== "at-mark") {
-              return decide("残:label");
-            }
-            // 信頼度ほぼゼロの非データ語は UI 部品（枠線・罫線）の誤認識なので塗らない
-            if (unit.confidence < NOISE_CONFIDENCE && reason !== "digit" && reason !== "at-mark") {
-              return decide(`残:noise(${Math.round(unit.confidence)})`);
-            }
-            decide(`塗:${reason}`);
-            const { x0, y0, x1, y1 } = unit.bbox;
-            masks.push({
-              x: x0 / OCR_SCALE - MASK_PADDING,
-              y: y0 / OCR_SCALE - MASK_PADDING,
-              w: (x1 - x0) / OCR_SCALE + MASK_PADDING * 2,
-              h: (y1 - y0) / OCR_SCALE + MASK_PADDING * 2,
-              source: "auto",
-              reason,
-              text: unit.text,
-            });
-          });
-          // 塗りすぎ・塗り漏れ調査用。確認画面の DevTools コンソールで確認できる
-          console.debug("[mask2gemini]", decisions.join(" | "));
-        }
+        // メールアドレス等は、折り返しで視覚的に複数の OCR 行へまたがることがある
+        // （例: 狭い列幅で word-break: break-all のように途中改行される）。
+        // Tesseract の行単位のままだと "@" と本体が別行に分かれて塗り漏れるため、
+        // パターン照合・アローリスト照合は段落（paragraph）全体を結合して行う。
+        // 判定単位（unit）自体は元の OCR 行ごとの bbox を保持したまま使う。
+        const units = para.lines.flatMap((line) => lineToUnits(line, tokenizer));
+        const { masks: paraMasks, decisions } = decideParagraphMasks(units, {
+          judge, judgeToken, findLinePatternMaskIndices, findProtectedWordIndices,
+          userTerms, labelTerms,
+          noiseConfidence: NOISE_CONFIDENCE, ocrScale: OCR_SCALE, maskPadding: MASK_PADDING,
+        });
+        masks.push(...paraMasks);
+        // 塗りすぎ・塗り漏れ調査用。確認画面の DevTools コンソールで確認できる
+        console.debug("[mask2gemini]", decisions.join(" | "));
       }
     }
     render();

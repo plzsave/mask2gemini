@@ -38,6 +38,47 @@ bash scripts/package.sh   # dist/mask2gemini-<version>.zip を生成
 
 zip を渡した先では、展開して `chrome://extensions`（デベロッパーモード）→「パッケージ化されていない拡張機能を読み込む」で `extension/` を選ぶだけ。git・bun は不要。
 
-## E2E 検証
+## 検証プロセス
 
-`test/fixture.html`（架空データの顧客管理画面）をブラウザで開いて拡張を実行し、SPEC.md の「検証手順（E2E）」に従って確認する。
+判定ロジック（rules.js / allowlist.js / mask-decider.js）を変更したら、次の順で確認する。
+
+### 1. 単体テスト（高速・毎回実行）
+
+```bash
+bun run test   # node:test 互換。DOM/OCR/chrome API 不要、数十ms で終わる
+```
+
+`extension/*.test.js` に判定ロジックの純関数テストがある。ここでロジックの
+リグレッションを潰してから E2E に進む。
+
+### 2. E2E テスト（実ブラウザ＋実 OCR）
+
+```bash
+npx playwright install chromium   # 初回のみ
+bun run test:e2e
+```
+
+Playwright でヘッドレス Chromium に拡張機能を実際に読み込み、`test/fixture.html` /
+`test/fixtures/*.html` を撮影 → OCR → 自動マスクまでフルパイプラインで実行し、
+結果の canvas をピクセルサンプリングして「塗られるべき要素が黒塗りされているか」
+「残るべき要素が変化していないか」を検証する（`test/e2e/mask.spec.js`）。
+
+判定ロジックの単体テストでは検出できない、OCR の行/段落分割の癖に起因する
+不具合（折り返しメールの塗り漏れ等）はこの層でしか再現できない。既知の未修正
+バグは fixture 側に `data-known-issue="<GitHub issue番号>"` を付けて警告ログ
+のみに倒してあり、直ったら属性を外して通常の assertion に戻す。
+
+### 3. 手動 E2E（目視、最終確認）
+
+上記2層で拾いきれない見た目の違和感（マスクの余白感、UI 全体の見え方等）は
+`test/fixture.html` を手動でブラウザ開いて目視する。SPEC.md の「検証手順（E2E）」
+を参照。
+
+`test/fixtures/` の各ファイルの狙いは以下（詳細は SPEC.md「追加フィクスチャ
+（エッジケース）」を参照）:
+
+- `email-wrap.html` — 狭い列幅でメールアドレスが視覚的に折り返される/短いドメイン
+- `unknown-ui-labels.html` — 組み込み辞書に無い一般的な UI ラベル語彙
+- `phone-postal-formats.html` — 電話・郵便番号の表記ゆれ（全角・かっこ・国番号等）
+- `noise-borders.html` — 装飾的な罫線・アイコン・低コントラスト文字
+- `dashboard.html` — グラフ/統計値を含むダッシュボード画面

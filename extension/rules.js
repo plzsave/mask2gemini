@@ -49,6 +49,53 @@
       .replace(/[Ａ-Ｚａ-ｚ０-９＠]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
       .toLowerCase();
 
+  // OCR の単語/トークン分割でメールアドレスが断片化すると、"@" や桁数を含まない
+  // 断片（例: 短いドメイン末尾）が judge()/judgeToken() を単体では通過してしまい
+  // 塗り漏れになる。これを防ぐため、行を結合した文字列に対してメール全体の
+  // パターンを照合し、一致範囲にかかる全トークンをまとめて塗る。
+  const LINE_PATTERNS = [
+    { re: /[a-z0-9][a-z0-9._%+-]*@[a-z0-9-]+(?:\.[a-z0-9-]+)+/g, reason: "email" },
+  ];
+
+  // フレーズ照合（normalizePhrase）と違い、空白・記号を除去しない。
+  // "@" "." はメールアドレスの構文そのものなので除去すると一致しなくなる。
+  const normalizeForLineMatch = (raw) =>
+    raw
+      .replace(/[Ａ-Ｚａ-ｚ０-９＠]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+      .toLowerCase();
+
+  /**
+   * 1 行分の判定単位列を結合し、LINE_PATTERNS に一致する範囲を検出する。
+   * 一致範囲にかかる全 unit の index を reason 付きで返す（マスク追加用）。
+   * allowlist.findProtectedWordIndices はマスク解除専用なのでこちらは別関数として設ける。
+   * @param {{text: string}[]} units
+   * @returns {Map<number, string>} unit index -> reason
+   */
+  function findLinePatternMaskIndices(units) {
+    const result = new Map();
+    const normTexts = units.map((u) => normalizeForLineMatch(u.text));
+    const joined = normTexts.join("");
+    if (joined.length === 0) return result;
+
+    // 連結文字列の各文字がどの unit 由来かの対応表
+    const owner = [];
+    normTexts.forEach((t, i) => {
+      for (let k = 0; k < t.length; k++) owner.push(i);
+    });
+
+    for (const { re, reason } of LINE_PATTERNS) {
+      re.lastIndex = 0;
+      let m;
+      while ((m = re.exec(joined))) {
+        const start = m.index;
+        const end = start + m[0].length;
+        for (let k = start; k < end && k < owner.length; k++) result.set(owner[k], reason);
+        if (m[0].length === 0) re.lastIndex += 1; // ゼロ幅一致時の無限ループ防止
+      }
+    }
+    return result;
+  }
+
   /**
    * OCR で得た 1 単語を塗るべきか判定する。
    * @param {string} rawText
@@ -93,6 +140,12 @@
     if (/^[^\p{L}\p{N}]+$/u.test(text)) return { mask: false, reason: "punct" };
     if (text.length >= LONG_TEXT_THRESHOLD) return { mask: true, reason: "long-text" };
     if (UI_LABEL_ALLOWLIST.has(text)) return { mask: false, reason: "allowlist" };
+    // ASCII のみの短い語（OK / ID / FAX 等）は judge() と同じ基準で残す。
+    // 英語は IPADIC に無く word_type が UNKNOWN になりがちで、この救済が無いと
+    // proper-noun/unknown-token 判定より先に短い実用語まで塗ってしまう
+    if (ASCII_WORD.test(text) && text.length <= ASCII_KEEP_MAX_LEN) {
+      return { mask: false, reason: "short-ascii" };
+    }
 
     if (token.pos === "名詞" && token.pos_detail_1 === "固有名詞") {
       return { mask: true, reason: "proper-noun" };
@@ -109,5 +162,7 @@
     return { mask: false, reason: `pos:${token.pos}` };
   }
 
-  globalThis.Mask2GeminiRules = { judge, judgeToken, LONG_TEXT_THRESHOLD, UI_LABEL_ALLOWLIST };
+  globalThis.Mask2GeminiRules = {
+    judge, judgeToken, findLinePatternMaskIndices, LONG_TEXT_THRESHOLD, UI_LABEL_ALLOWLIST,
+  };
 })();

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>装飾枠線・低コントラストUI（E2E フィクスチャ）</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f0f1f3; color: #222; }
+    header { background: #2b4a6f; color: #fff; padding: 12px 24px; }
+    header h1 { font-size: 18px; margin: 0; }
+    main { padding: 24px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .card {
+      background: #fff;
+      border: 2px double #b8bec7;
+      border-radius: 4px;
+      padding: 10px;
+      box-shadow: inset 0 0 0 1px #dfe3e8, 2px 2px 0 #e2e5ea;
+    }
+    .card .icon { font-size: 20px; color: #cfd4da; text-align: center; }
+    .card .label { font-size: 11px; color: #9aa1ab; text-align: center; margin-top: 4px; }
+    .divider { border: none; border-top: 1px dashed #c3c8ce; margin: 20px 0; }
+    .rule-line { font-family: monospace; color: #cfd4da; letter-spacing: 2px; text-align: center; }
+    .faint { color: #d8dbe0; font-size: 12px; }
+    .grid-lines {
+      background-image:
+        repeating-linear-gradient(0deg, #e6e9ec, #e6e9ec 1px, transparent 1px, transparent 20px),
+        repeating-linear-gradient(90deg, #e6e9ec, #e6e9ec 1px, transparent 1px, transparent 20px);
+      height: 100px;
+      border: 1px solid #d0d5da;
+    }
+  </style>
+</head>
+<body>
+  <!-- 罫線・アイコン・薄い装飾文字が OCR に文字として誤認識されやすいレイアウト。
+       confidence がほぼ 0 のノイズ扱いになり塗られないことを確認する用途 -->
+  <header><h1>枠線・低コントラスト検証</h1></header>
+  <main>
+    <div class="card"><div class="icon">▢</div><div class="label">フォルダ</div></div>
+    <div class="card"><div class="icon">◎</div><div class="label">お気に入り</div></div>
+    <div class="card"><div class="icon">▦</div><div class="label">グリッド表示</div></div>
+    <div class="card"><div class="icon">✎</div><div class="label" data-check="keep">編集</div></div>
+  </main>
+  <hr class="divider">
+  <div class="rule-line" data-check="keep">─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─</div>
+  <p class="faint" data-check="keep">読み込み中… 表示するデータがありません</p>
+  <div class="grid-lines" data-check="keep"></div>
+</body>
+</html>

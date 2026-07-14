@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>電話・郵便番号の表記ゆれ（E2E フィクスチャ）</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f5f6f8; color: #222; }
+    header { background: #2b4a6f; color: #fff; padding: 12px 24px; }
+    header h1 { font-size: 18px; margin: 0; }
+    main { padding: 24px; }
+    table { border-collapse: collapse; background: #fff; width: 100%; font-size: 14px; }
+    th, td { border: 1px solid #d0d5da; padding: 10px 14px; text-align: left; }
+    th { background: #e8ecf1; width: 160px; }
+  </style>
+</head>
+<body>
+  <!-- すべて架空のダミーデータ -->
+  <header><h1>電話・郵便番号 表記ゆれ検証</h1></header>
+  <main>
+    <table>
+      <tr><th>ハイフン区切り</th><td>090-1234-5678</td></tr>
+      <tr><th>スペース区切り</th><td>090 1234 5678</td></tr>
+      <tr><th>市外局番かっこ</th><td>(03)1234-5678</td></tr>
+      <tr><th>国番号付き</th><td>+81-90-1234-5678</td></tr>
+      <tr><th>全角数字</th><td>０９０－１２３４－５６７８</td></tr>
+      <tr><th>内線付き</th><td>03-1234-5678 (内線 210)</td></tr>
+      <tr><th>郵便番号（半角）</th><td>〒150-0001</td></tr>
+      <tr><th>郵便番号（全角）</th><td>〒１５０ー０００１</td></tr>
+      <tr><th>フリーダイヤル</th><td>0120-123-456</td></tr>
+      <tr><th>FAX表記</th><td>FAX: 03-9876-5432</td></tr>
+    </table>
+  </main>
+</body>
+</html>

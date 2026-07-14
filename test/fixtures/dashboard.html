@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>ダッシュボード（E2E フィクスチャ）</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f5f6f8; color: #222; }
+    header { background: #2b4a6f; color: #fff; padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; }
+    header h1 { font-size: 18px; margin: 0; }
+    main { padding: 24px; }
+    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+    .kpi { background: #fff; border: 1px solid #d0d5da; border-radius: 6px; padding: 14px; }
+    .kpi .label { font-size: 12px; color: #667; }
+    .kpi .value { font-size: 24px; font-weight: bold; margin-top: 4px; }
+    .kpi .delta { font-size: 12px; color: #2a8a4a; }
+    .kpi .delta.bad { color: #c0392b; }
+    .chart-panel { background: #fff; border: 1px solid #d0d5da; border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+    .chart-panel h2 { font-size: 14px; margin: 0 0 12px; }
+    .bars { display: flex; align-items: flex-end; gap: 8px; height: 120px; }
+    .bar { width: 24px; background: #4a7ab8; position: relative; }
+    .bar span { position: absolute; bottom: -18px; left: 0; right: 0; text-align: center; font-size: 10px; color: #667; }
+    table { border-collapse: collapse; background: #fff; width: 100%; font-size: 13px; }
+    th, td { border: 1px solid #d0d5da; padding: 8px 12px; text-align: left; }
+    th { background: #e8ecf1; }
+  </style>
+</head>
+<body>
+  <!-- サービス利用実績・エラー件数のダッシュボード想定。すべて架空の値 -->
+  <header><h1>運用ダッシュボード</h1><span>株式会社サンプル / 管理者: 岡田</span></header>
+  <main>
+    <div class="kpis">
+      <div class="kpi"><div class="label">月間アクティブユーザー</div><div class="value">128,450</div><div class="delta">+4.2%</div></div>
+      <div class="kpi"><div class="label">エラー件数（24h）</div><div class="value">37</div><div class="delta bad">+12件</div></div>
+      <div class="kpi"><div class="label">稼働率</div><div class="value">99.95%</div><div class="delta">±0%</div></div>
+      <div class="kpi"><div class="label">平均応答時間</div><div class="value">182ms</div><div class="delta">-8ms</div></div>
+    </div>
+    <div class="chart-panel">
+      <h2>週次エラー推移</h2>
+      <div class="bars">
+        <div class="bar" style="height:40%"><span>月</span></div>
+        <div class="bar" style="height:65%"><span>火</span></div>
+        <div class="bar" style="height:30%"><span>水</span></div>
+        <div class="bar" style="height:80%"><span>木</span></div>
+        <div class="bar" style="height:50%"><span>金</span></div>
+        <div class="bar" style="height:20%"><span>土</span></div>
+        <div class="bar" style="height:15%"><span>日</span></div>
+      </div>
+    </div>
+    <table>
+      <tr><th>サービス</th><th>ステータス</th><th>担当</th><th>直近エラー</th></tr>
+      <tr><td>決済API</td><td>正常</td><td>岡田健太</td><td>error_code=502 timeout at gateway</td></tr>
+      <tr><td>通知バッチ</td><td>警告</td><td>藤田</td><td>retry limit exceeded (3/3)</td></tr>
+      <tr><td>認証基盤</td><td>正常</td><td>岡田健太</td><td>-</td></tr>
+    </table>
+  </main>
+</body>
+</html>

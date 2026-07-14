@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>未収録UIラベル（E2E フィクスチャ）</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f5f6f8; color: #222; }
+    header { background: #2b4a6f; color: #fff; padding: 12px 24px; }
+    header h1 { font-size: 18px; margin: 0; }
+    main { padding: 24px; }
+    .toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    button { font-size: 13px; padding: 6px 14px; border: 1px solid #2b4a6f; background: #fff; color: #2b4a6f; border-radius: 4px; }
+    .panel { background: #fff; border: 1px solid #d0d5da; border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+    .panel h2 { font-size: 14px; margin: 0 0 8px; }
+    .row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; border-bottom: 1px dashed #d0d5da; }
+  </style>
+</head>
+<body>
+  <!-- UI_LABEL_ALLOWLIST(rules.js) に未収録の一般的なラベル語彙を集めたページ。
+       PII ではないため過剰マスクの回帰確認に使う -->
+  <header><h1>未収録ラベル検証</h1></header>
+  <main>
+    <div class="toolbar">
+      <button>並び替え条件</button>
+      <button>表示件数</button>
+      <button>CSVエクスポート</button>
+      <button>一括操作</button>
+      <button>Refresh</button>
+      <button>Sync Status</button>
+      <button>Bulk Actions</button>
+    </div>
+    <div class="panel">
+      <h2>ステータス一覧</h2>
+      <!-- IPADIC に載っている一般語彙のみ data-check="keep" を付ける。
+           複合語（一括操作等）は形態素解析次第で頭文字が数詞誤判定される
+           既知の課題があるため対象外（別 Issue で追跡） -->
+      <div class="row"><span data-check="keep">有効/無効</span><span data-check="keep">権限</span></div>
+      <div class="row"><span data-check="keep">最終ログイン</span><span data-check="keep">更新履歴</span></div>
+      <div class="row"><span data-check="keep">利用状況</span><span data-check="keep">通知設定</span></div>
+    </div>
+    <div class="panel">
+      <h2>Account Overview</h2>
+      <div class="row"><span>Last Modified</span><span>Owner Role</span></div>
+      <div class="row"><span>Access Level</span><span>Subscription Plan</span></div>
+    </div>
+  </main>
+</body>
+</html>
