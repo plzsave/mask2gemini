@@ -27,6 +27,27 @@
     "help", "menu", "home", "detail", "details", "list", "view", "select",
     "name", "email", "address", "phone", "status", "date", "amount",
     "action", "actions", "filter", "sort", "export", "print", "note",
+    // Issue #2: 過剰マスク対策として追加した一般的な英語 UI 語彙
+    "import", "refresh", "reload", "reset", "apply", "clear", "retry",
+    "continue", "skip", "finish", "start", "stop", "pause", "resume",
+    "sync", "sync status", "bulk", "bulk actions", "overview", "summary",
+    "account overview",
+    "dashboard", "report", "reports", "analytics", "last modified",
+    "modified", "owner", "role", "owner role", "access", "access level",
+    "subscription", "subscription plan", "plan", "download", "upload",
+    "archive", "draft", "published", "active", "inactive", "enabled",
+    "disabled", "pending", "preview", "duplicate", "copy", "paste",
+    "undo", "redo", "loading", "error", "warning", "success", "info",
+    "notification", "notifications", "profile", "account", "accounts",
+    "user", "users", "admin", "administrator", "history", "recent",
+    "favorite", "favorites", "bookmark", "bookmarks", "tag", "tags",
+    "category", "categories", "group", "groups", "team", "teams",
+    "csv", "pdf",
+    // Issue #2: カタカナの UI 語彙（英語と混在する語もそのまま塗り漏れないよう
+    // フレーズとして併記する。例:「CSVエクスポート」は分割されず1トークンに
+    // なりうるため、部分一致ではなく語全体をアローリストに含める）
+    "エクスポート", "インポート", "リフレッシュ", "ダッシュボード",
+    "csvエクスポート", "csvインポート",
   ]);
 
   // 定型 PII（ブロックリスト）。OCR の単語分割で崩れても部分一致で拾えるよう緩めに書く。
