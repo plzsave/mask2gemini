@@ -49,10 +49,45 @@ button:focus-visible { outline: 2px solid #7db8a8; outline-offset: 2px; }
   padding: 0 1rem 2rem;
   overflow: auto;
 }
+
+.debug-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.4rem 0;
+  font-size: 0.82rem;
+  color: #9aa4ad;
+}
+.debug-toggle-label { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; }
+.debug-legend { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.legend-item { display: inline-flex; align-items: center; gap: 0.3rem; }
+.legend-item i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.canvas-wrap {
+  position: relative;
+  display: inline-block;
+  border: 1px solid #3a4046;
+}
 #canvas {
+  display: block;
   max-width: 100%;
   height: auto;
   cursor: crosshair;
-  border: 1px solid #3a4046;
   background: #fff;
 }
+#debug-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: 100%;
+  height: auto;
+  pointer-events: none; /* 手動編集(クリック/ドラッグ)は #canvas にそのまま通す */
+  display: none;
+}
+#debug-overlay.visible { display: block; }

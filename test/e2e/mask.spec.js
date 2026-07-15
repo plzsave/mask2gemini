@@ -183,4 +183,40 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     expect(checks.length).toBeGreaterThan(0);
     assertChecks(checks);
   });
+
+  // Issue #4: デバッグオーバーレイは #debug-overlay という別 canvas に描画され、
+  // copy-image がコピーする #canvas には一切触れない設計になっている。
+  // その前提が壊れていないことを、デバッグ表示ON/OFFで #canvas の
+  // toDataURL() が完全に一致することで直接検証する。
+  test("review.html: デバッグ表示のON/OFFで#canvas（コピー対象）のピクセルは変化しない", async ({ context, extensionId }) => {
+    const fixturePage = await context.newPage();
+    await fixturePage.setViewportSize({ width: 1280, height: 900 });
+    await fixturePage.goto(`file://${path.join(TEST_DIR, "fixture.html")}`);
+    const screenshot = await fixturePage.screenshot();
+    const dataUrl = `data:image/png;base64,${screenshot.toString("base64")}`;
+    await fixturePage.close();
+
+    let [sw] = context.serviceWorkers();
+    if (!sw) sw = await context.waitForEvent("serviceworker");
+    await sw.evaluate(async (url) => {
+      await chrome.storage.session.set({ capture: { dataUrl: url } });
+    }, dataUrl);
+
+    const reviewPage = await context.newPage();
+    await reviewPage.goto(`chrome-extension://${extensionId}/review.html`);
+    await reviewPage.locator("#status").filter({ hasText: "自動マスク" }).waitFor({ timeout: 100_000 });
+
+    const canvasDataUrl = () =>
+      reviewPage.evaluate(() => document.getElementById("canvas").toDataURL());
+
+    const beforeDebug = await canvasDataUrl();
+
+    await reviewPage.locator("#debug-toggle").check();
+    await expect(reviewPage.locator("#debug-overlay")).toHaveClass(/visible/);
+    expect(await canvasDataUrl()).toBe(beforeDebug);
+
+    await reviewPage.locator("#debug-toggle").uncheck();
+    await expect(reviewPage.locator("#debug-overlay")).not.toHaveClass(/visible/);
+    expect(await canvasDataUrl()).toBe(beforeDebug);
+  });
 });

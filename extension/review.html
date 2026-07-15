@@ -24,7 +24,17 @@
     コピーされるのは常にマスク適用後の画像です。Gemini には画像 → プロンプトの順に貼り付けてください。
   </p>
   <main class="stage">
-    <canvas id="canvas"></canvas>
+    <div class="debug-bar">
+      <label class="debug-toggle-label">
+        <input type="checkbox" id="debug-toggle">
+        デバッグ表示（判定reasonを枠色で表示）
+      </label>
+      <div id="debug-legend" class="debug-legend"></div>
+    </div>
+    <div class="canvas-wrap">
+      <canvas id="canvas"></canvas>
+      <canvas id="debug-overlay"></canvas>
+    </div>
   </main>
   <script src="vendor/tesseract/tesseract.min.js"></script>
   <script src="vendor/kuromoji/kuromoji.js"></script>

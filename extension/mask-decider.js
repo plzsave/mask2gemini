@@ -65,7 +65,7 @@
    * @param {number} deps.noiseConfidence
    * @param {number} deps.ocrScale
    * @param {number} deps.maskPadding
-   * @returns {{ masks: object[], decisions: string[] }}
+   * @returns {{ masks: object[], kept: object[], decisions: string[] }}
    */
   function decideParagraphMasks(units, deps) {
     const {
@@ -75,42 +75,74 @@
 
     const userProtected = findProtectedWordIndices(units, userTerms);
     const labelProtected = findProtectedWordIndices(units, labelTerms, { fullCoverage: true });
+    // 行結合パターン判定（メールアドレス断片の結合等）は units 全体を見て
+    // 事前に一括確定させる。個々の unit の confidence は一切参照しない
+    // （findLinePatternMaskIndices はテキストのみを見る純粋なパターン照合）。
+    // Issue #3: 個別トークンの NOISE_CONFIDENCE フィルタ（後段のループ内）より
+    // 必ず先に確定させ、下の isDataLike 判定でそのフィルタを無条件にバイパス
+    // させること。低信頼トークンが混ざっていてもパターンとして成立していれば
+    // confidence を割り引かずそのまま塗る（SPEC.md 確定事項2: recall優先。
+    // 割り引くと OCR が荒れた本物の PII を見逃すリスクが増えるため採用しない）。
+    // 将来 #1（トークン単位→行単位判定への一般化）で判定単位が変わっても、
+    // この順序（行結合確定 → confidence フィルタ）は維持すること。
     const linePatternMasked = findLinePatternMaskIndices(units);
 
+    // マスク矩形（padding込み）・kept矩形（padding無し）共通の座標変換
+    const toRect = ({ x0, y0, x1, y1 }, padding) => ({
+      x: x0 / ocrScale - padding,
+      y: y0 / ocrScale - padding,
+      w: (x1 - x0) / ocrScale + padding * 2,
+      h: (y1 - y0) / ocrScale + padding * 2,
+    });
+
     const masks = [];
+    const kept = [];
     const decisions = [];
     units.forEach((unit, i) => {
-      const decide = (verdict) => decisions.push(`${unit.text}=${verdict}`);
-      if (userProtected.has(i)) return decide("残:user"); // ユーザー登録は無条件で勝つ
+      // reason を渡すと、非マスクトークンとして kept にも記録する
+      // （デバッグオーバーレイ用。マスクした場合は reason 省略で masks 側にのみ積む）
+      const decide = (verdict, reason) => {
+        decisions.push(`${unit.text}=${verdict}`);
+        if (reason !== undefined) {
+          kept.push({ ...toRect(unit.bbox, 0), reason, text: unit.text });
+        }
+      };
+      if (userProtected.has(i)) return decide("残:user", "user"); // ユーザー登録は無条件で勝つ
       const linePatternReason = linePatternMasked.get(i);
       const { mask, reason } = linePatternReason
         ? { mask: true, reason: linePatternReason }
         : unit.token ? judgeToken(unit.token) : judge(unit.text);
-      if (!mask) return decide(`残:${reason}`);
+      if (!mask) return decide(`残:${reason}`, reason);
       // ラベル辞書による保護は、数字や @ を含む語・行結合で検出した語
       // （データの可能性が高い）には効かせない
       const isDataLike = reason === "digit" || reason === "at-mark" || Boolean(linePatternReason);
       if (labelProtected.has(i) && !isDataLike) {
-        return decide("残:label");
+        return decide("残:label", "label");
       }
-      // 信頼度ほぼゼロの非データ語は UI 部品（枠線・罫線）の誤認識なので塗らない
+      // 信頼度ほぼゼロの非データ語は UI 部品（枠線・罫線）の誤認識なので塗らない。
+      // linePatternReason（isDataLike）があるトークンはここを必ず通り抜ける
+      // （上のコメント参照。Issue #3で明文化した恒久方針）
       if (unit.confidence < noiseConfidence && !isDataLike) {
-        return decide(`残:noise(${Math.round(unit.confidence)})`);
+        const noiseReason = `noise(${Math.round(unit.confidence)})`;
+        return decide(`残:${noiseReason}`, noiseReason);
       }
       decide(`塗:${reason}`);
-      const { x0, y0, x1, y1 } = unit.bbox;
-      masks.push({
-        x: x0 / ocrScale - maskPadding,
-        y: y0 / ocrScale - maskPadding,
-        w: (x1 - x0) / ocrScale + maskPadding * 2,
-        h: (y1 - y0) / ocrScale + maskPadding * 2,
-        source: "auto",
-        reason,
-        text: unit.text,
-      });
+      masks.push({ ...toRect(unit.bbox, maskPadding), source: "auto", reason, text: unit.text });
     });
-    return { masks, decisions };
+    return { masks, kept, decisions };
   }
 
-  globalThis.Mask2GeminiMaskDecider = { lineToUnits, decideParagraphMasks };
+  // reason 文字列から決定的に色相(0-359)を導出する。デバッグオーバーレイの
+  // reason ごとの色分けに使う。noise(23) のような可変部分を含む reason は
+  // 括弧以降を無視して正規化し、同じ系列は同じ色になるようにする
+  function reasonColorHue(reason) {
+    const key = reason.replace(/\(.*\)$/, "");
+    let hash = 0;
+    for (let i = 0; i < key.length; i++) {
+      hash = (hash * 31 + key.charCodeAt(i)) | 0;
+    }
+    return Math.abs(hash) % 360;
+  }
+
+  globalThis.Mask2GeminiMaskDecider = { lineToUnits, decideParagraphMasks, reasonColorHue };
 })();

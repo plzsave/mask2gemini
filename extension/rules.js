@@ -95,6 +95,10 @@
    * 1 行分の判定単位列を結合し、LINE_PATTERNS に一致する範囲を検出する。
    * 一致範囲にかかる全 unit の index を reason 付きで返す（マスク追加用）。
    * allowlist.findProtectedWordIndices はマスク解除専用なのでこちらは別関数として設ける。
+   *
+   * 意図的に unit.confidence を一切参照しない（テキストのみで判定する）。
+   * 呼び出し側（mask-decider.js）はこの結果を個別トークンの NOISE_CONFIDENCE
+   * フィルタより優先させる設計になっている（Issue #3）。
    * @param {{text: string}[]} units
    * @returns {Map<number, string>} unit index -> reason
    */

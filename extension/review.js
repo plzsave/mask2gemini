@@ -3,7 +3,7 @@
   "use strict";
 
   const { judge, judgeToken, findLinePatternMaskIndices } = globalThis.Mask2GeminiRules;
-  const { lineToUnits, decideParagraphMasks } = globalThis.Mask2GeminiMaskDecider;
+  const { lineToUnits, decideParagraphMasks, reasonColorHue } = globalThis.Mask2GeminiMaskDecider;
 
   // 単語 bbox の外側に足す余白 (px)。文字の欠け対策で広めに塗る
   const MASK_PADDING = 3;
@@ -15,10 +15,16 @@
   // 「巡」「昌」等の文字として誤認識される（confidence ≒ 0。実文字は 90 前後）
   // のを除外するため。数字・@ を含む語は信頼度が低くても塗る（安全側）
   const NOISE_CONFIDENCE = 35;
+  // デバッグ表示のON/OFFを保存するキー（chrome.storage.local）
+  const DEBUG_MODE_KEY = "debugMaskVisualization";
 
   const statusEl = document.getElementById("status");
   const canvas = document.getElementById("canvas");
   const ctx = canvas.getContext("2d");
+  const overlayCanvas = document.getElementById("debug-overlay");
+  const overlayCtx = overlayCanvas.getContext("2d");
+  const debugToggle = document.getElementById("debug-toggle");
+  const debugLegend = document.getElementById("debug-legend");
   const btnCopyImage = document.getElementById("copy-image");
   const btnCopyPrompt = document.getElementById("copy-prompt");
   const btnOpenGemini = document.getElementById("open-gemini");
@@ -44,10 +50,15 @@
   });
   canvas.width = image.naturalWidth;
   canvas.height = image.naturalHeight;
+  overlayCanvas.width = image.naturalWidth;
+  overlayCanvas.height = image.naturalHeight;
 
   // masks: 画像ピクセル座標系 {x, y, w, h, source, reason}
   let masks = [];
   let dragPreview = null;
+  // kept: 非マスクトークン {x, y, w, h, reason, text}。デバッグオーバーレイ専用で、
+  // #canvas の描画（≒コピーされる画像）には一切関与しない
+  let allKept = [];
 
   function render() {
     ctx.drawImage(image, 0, 0);
@@ -59,6 +70,49 @@
     }
   }
   render();
+
+  // ---- デバッグオーバーレイ（判定reasonの可視化。#canvas とは別レイヤーなので
+  // copy-image で出力される画像には混入しない） ----
+  const reasonColor = (reason) => `hsl(${reasonColorHue(reason)}, 70%, 55%)`;
+
+  function renderLegend() {
+    const reasons = new Set([...masks.map((m) => m.reason), ...allKept.map((k) => k.reason)]);
+    debugLegend.replaceChildren(...[...reasons].sort().map((reason) => {
+      const item = document.createElement("span");
+      item.className = "legend-item";
+      const swatch = document.createElement("i");
+      swatch.style.background = reasonColor(reason);
+      item.append(swatch, document.createTextNode(reason));
+      return item;
+    }));
+  }
+
+  function renderDebugOverlay() {
+    overlayCanvas.classList.toggle("visible", debugToggle.checked);
+    overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+    if (!debugToggle.checked) return;
+    overlayCtx.lineWidth = 2;
+    overlayCtx.setLineDash([]);
+    for (const m of masks) {
+      overlayCtx.strokeStyle = reasonColor(m.reason);
+      overlayCtx.strokeRect(m.x, m.y, m.w, m.h);
+    }
+    overlayCtx.lineWidth = 1;
+    overlayCtx.setLineDash([3, 2]);
+    for (const k of allKept) {
+      overlayCtx.strokeStyle = reasonColor(k.reason);
+      overlayCtx.strokeRect(k.x, k.y, k.w, k.h);
+    }
+    overlayCtx.setLineDash([]);
+    renderLegend();
+  }
+
+  const { [DEBUG_MODE_KEY]: savedDebugMode } = await chrome.storage.local.get(DEBUG_MODE_KEY);
+  debugToggle.checked = Boolean(savedDebugMode);
+  debugToggle.addEventListener("change", async () => {
+    await chrome.storage.local.set({ [DEBUG_MODE_KEY]: debugToggle.checked });
+    renderDebugOverlay();
+  });
 
   // ---- 形態素解析器（kuromoji）の読み込み ----
   // OCR の単語分割は日本語の語彙単位と一致しないため、判定は形態素トークン単位で行う。
@@ -131,16 +185,18 @@
       // 塗り漏れを防ぐことを優先する
       const units = block.paragraphs.flatMap((para) =>
         para.lines.flatMap((line) => lineToUnits(line, tokenizer)));
-      const { masks: blockMasks, decisions } = decideParagraphMasks(units, {
+      const { masks: blockMasks, kept: blockKept, decisions } = decideParagraphMasks(units, {
         judge, judgeToken, findLinePatternMaskIndices, findProtectedWordIndices,
         userTerms, labelTerms,
         noiseConfidence: NOISE_CONFIDENCE, ocrScale: OCR_SCALE, maskPadding: MASK_PADDING,
       });
       masks.push(...blockMasks);
+      allKept.push(...blockKept);
       // 塗りすぎ・塗り漏れ調査用。確認画面の DevTools コンソールで確認できる
       console.debug("[mask2gemini]", decisions.join(" | "));
     }
     render();
+    renderDebugOverlay();
     setStatus(`自動マスク ${masks.length} 件。目視で確認し、過不足を直してください。`);
   } finally {
     await worker.terminate();
@@ -197,6 +253,7 @@
     dragStart = null;
     dragPreview = null;
     render();
+    renderDebugOverlay();
     setStatus(`マスク ${masks.length} 件`);
   });
 
