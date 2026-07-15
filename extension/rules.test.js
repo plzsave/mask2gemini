@@ -25,9 +25,16 @@ test("judge: 人名になり得る短い日本語は塗る", () => {
   assert.equal(judge("山田").reason, "jp-name-like");
 });
 
-test("judge: ASCII 3文字以下は残す・4文字以上は塗る", () => {
-  assert.deepEqual(judge("OK"), { mask: false, reason: "short-ascii" });
+test("judge: アローリスト外の短いASCII語は長さに関わらず塗る（Issue #10）", () => {
+  // "OK" は今後 UI_LABEL_ALLOWLIST に登録済みの語だけが残る前提。
+  // 登録が無い短い語（人名になり得る）は塗られる
+  assert.deepEqual(judge("Bob"), { mask: true, reason: "ascii-word" });
   assert.deepEqual(judge("test").mask, true);
+});
+
+test("judge: UI_LABEL_ALLOWLIST に登録済みの短いASCII略語は残す", () => {
+  assert.deepEqual(judge("OK"), { mask: false, reason: "allowlist" });
+  assert.deepEqual(judge("FAX"), { mask: false, reason: "allowlist" });
 });
 
 test("judge: 8文字以上は内容を問わず塗る（recall優先）", () => {
@@ -61,9 +68,16 @@ test("judgeToken: 未知語（英語の長い語）は塗る", () => {
   assert.equal(judgeToken(token).reason, "long-text"); // 8文字以上は長さで先に落ちる
 });
 
-test("judgeToken: 短い ASCII 未知語（FAX等）は judge() と同じ基準で残す", () => {
+test("judgeToken: アローリスト登録済みの短いASCII略語（FAX等）は残す", () => {
   const token = { surface_form: "FAX", pos: "名詞", pos_detail_1: "一般", word_type: "UNKNOWN" };
-  assert.deepEqual(judgeToken(token), { mask: false, reason: "short-ascii" });
+  assert.deepEqual(judgeToken(token), { mask: false, reason: "allowlist" });
+});
+
+test("judgeToken: アローリスト外の短い英語名は塗る（Issue #10）", () => {
+  // kuromoji は "Bob" のような未知の短い英単語を 名詞/固有名詞/UNKNOWN と推定する
+  // （"OK"/"FAX" 等の実用略語と同じシグネチャ。区別できないため長さでは救済しない）
+  const token = { surface_form: "Bob", pos: "名詞", pos_detail_1: "固有名詞", word_type: "UNKNOWN" };
+  assert.deepEqual(judgeToken(token), { mask: true, reason: "proper-noun" });
 });
 
 test("judgeToken: 一般語（辞書に載っている語）は残す", () => {

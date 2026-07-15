@@ -43,6 +43,9 @@
     "favorite", "favorites", "bookmark", "bookmarks", "tag", "tags",
     "category", "categories", "group", "groups", "team", "teams",
     "csv", "pdf",
+    // Issue #10: 3文字以下ASCII語の自動救済を廃止した代わりに追加した
+    // 実用略語（運用しながら追加する前提。個別の短い人名との衝突は許容する）
+    "ok", "id", "no", "fax", "url",
     // Issue #2: カタカナの UI 語彙（英語と混在する語もそのまま塗り漏れないよう
     // フレーズとして併記する。例:「CSVエクスポート」は分割されず1トークンに
     // なりうるため、部分一致ではなく語全体をアローリストに含める）
@@ -59,9 +62,8 @@
   // 人名になり得る短い日本語（漢字・かな 1〜4 文字）。アローリストに無ければ塗る。
   const JP_NAME_LIKE = /^[ぁ-ゖァ-ヺー一-鿿々]{1,4}$/;
 
-  // ASCII のみの語。3 文字以下（OK / ID 等）は残し、それ以外はアローリストに無ければ塗る。
+  // ASCII のみの語。アローリストに無ければ長さに関わらず塗る（Issue #10）。
   const ASCII_WORD = /^[A-Za-z][A-Za-z.'-]*$/;
-  const ASCII_KEEP_MAX_LEN = 3;
 
   // 住所の行政区画接尾辞（1文字）。kuromoji は「東京都」を固有名詞「東京」+
   // 一般名詞「都」に分割するため、judgeToken() の固有名詞判定だけでは
@@ -142,11 +144,11 @@
     if (text.length >= LONG_TEXT_THRESHOLD) return { mask: true, reason: "long-text" };
     if (UI_LABEL_ALLOWLIST.has(text)) return { mask: false, reason: "allowlist" };
     if (JP_NAME_LIKE.test(rawText.trim())) return { mask: true, reason: "jp-name-like" };
-    if (ASCII_WORD.test(text)) {
-      return text.length <= ASCII_KEEP_MAX_LEN
-        ? { mask: false, reason: "short-ascii" }
-        : { mask: true, reason: "ascii-word" };
-    }
+    // ASCII 語は長さに関わらず塗る。かつては3文字以下（OK/ID/FAX等）を長さだけで
+    // 残していたが、"Bob"/"Wei"/"Xi" のような短い人名と区別できないことが判明した
+    // （Issue #10: kuromoji 上どちらも同じ POS シグネチャになる）。実用略語は
+    // UI_LABEL_ALLOWLIST への個別登録で残す（recall優先、SPEC.md確定事項2）
+    if (ASCII_WORD.test(text)) return { mask: true, reason: "ascii-word" };
     // 記号混じり等の判別不能な語は recall 優先で塗る
     return { mask: true, reason: "unknown" };
   }
@@ -175,13 +177,6 @@
     // 分類され、固有名詞判定だけでは拾えない（Issue #5）。単体トークンとして
     // 出現した場合はここで塗る
     if (ADDRESS_SUFFIX.has(surface)) return { mask: true, reason: "address-suffix" };
-    // ASCII のみの短い語（OK / ID / FAX 等）は judge() と同じ基準で残す。
-    // 英語は IPADIC に無く word_type が UNKNOWN になりがちで、この救済が無いと
-    // proper-noun/unknown-token 判定より先に短い実用語まで塗ってしまう
-    if (ASCII_WORD.test(text) && text.length <= ASCII_KEEP_MAX_LEN) {
-      return { mask: false, reason: "short-ascii" };
-    }
-
     if (token.pos === "名詞" && token.pos_detail_1 === "固有名詞") {
       return { mask: true, reason: "proper-noun" };
     }
