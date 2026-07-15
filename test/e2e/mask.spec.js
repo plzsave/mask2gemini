@@ -178,6 +178,12 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     assertChecks(checks);
   });
 
+  test("fixtures/phone-postal-formats.html: 電話・郵便番号は区切り文字ごと塗られる", async ({ context, extensionId }) => {
+    const { checks } = await captureAndReview(context, extensionId, "fixtures/phone-postal-formats.html");
+    expect(checks.length).toBeGreaterThan(0);
+    assertChecks(checks);
+  });
+
   test("fixtures/noise-borders.html: 装飾要素・罫線は誤マスクされない", async ({ context, extensionId }) => {
     const { checks } = await captureAndReview(context, extensionId, "fixtures/noise-borders.html");
     expect(checks.length).toBeGreaterThan(0);

@@ -15,19 +15,26 @@
 </head>
 <body>
   <!-- すべて架空のダミーデータ -->
-  <header><h1>電話・郵便番号 表記ゆれ検証</h1></header>
+  <header><h1 data-check="keep">電話・郵便番号 表記ゆれ検証</h1></header>
   <main>
     <table>
-      <tr><th>ハイフン区切り</th><td>090-1234-5678</td></tr>
-      <tr><th>スペース区切り</th><td>090 1234 5678</td></tr>
-      <tr><th>市外局番かっこ</th><td>(03)1234-5678</td></tr>
-      <tr><th>国番号付き</th><td>+81-90-1234-5678</td></tr>
-      <tr><th>全角数字</th><td>０９０－１２３４－５６７８</td></tr>
-      <tr><th>内線付き</th><td>03-1234-5678 (内線 210)</td></tr>
-      <tr><th>郵便番号（半角）</th><td>〒150-0001</td></tr>
-      <tr><th>郵便番号（全角）</th><td>〒１５０ー０００１</td></tr>
-      <tr><th>フリーダイヤル</th><td>0120-123-456</td></tr>
-      <tr><th>FAX表記</th><td>FAX: 03-9876-5432</td></tr>
+      <tr><th>ハイフン区切り</th><td data-check="mask">090-1234-5678</td></tr>
+      <tr><th>スペース区切り</th><td data-check="mask">090 1234 5678</td></tr>
+      <tr><th>市外局番かっこ</th><td data-check="mask">(03)1234-5678</td></tr>
+      <tr><th>国番号付き</th><td data-check="mask">+81-90-1234-5678</td></tr>
+      <tr><th>全角数字</th><td data-check="mask">０９０－１２３４－５６７８</td></tr>
+      <!-- 「内線」はラベル語（辞書に載る一般語）なので残ってよい。
+           数字部分と区切り文字が塗られることだけを span 単位で検証する -->
+      <tr><th>内線付き</th><td><span data-check="mask">03-1234-5678</span> (内線 <span data-check="mask">210</span>)</td></tr>
+      <tr><th>郵便番号（半角）</th><td data-check="mask">〒150-0001</td></tr>
+      <tr><th>郵便番号（全角）</th><td data-check="mask">〒１５０ー０００１</td></tr>
+      <tr><th>フリーダイヤル</th><td data-check="mask">0120-123-456</td></tr>
+      <!-- "FAX" はアローリスト登録済みラベルなので残るのが正しい -->
+      <tr><th data-check="keep">FAX表記</th><td><span data-check="keep">FAX</span>: <span data-check="mask">03-9876-5432</span></td></tr>
+      <!-- 区切り文字の前後にスペースを広く挟んだ形。区切りトークン（-）が
+           塗り漏れた場合、マスク矩形の padding では隙間が埋まらず輝度判定で
+           検出できる（Issue #1 の行結合 digit-run 判定の red-green 用） -->
+      <tr><th>スペース＋ハイフン</th><td data-check="mask">090&nbsp;&nbsp;-&nbsp;&nbsp;1234&nbsp;&nbsp;-&nbsp;&nbsp;5678</td></tr>
     </table>
   </main>
 </body>
