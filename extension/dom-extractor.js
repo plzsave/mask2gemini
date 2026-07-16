@@ -24,11 +24,16 @@
   const OPAQUE_MIN_PX = 24;
 
   // 確定事項11: 要素種別レベルの構造判定。ラベル系 → 残す方向の保護、
-  // データ系 → テキスト判定が「残す」でも塗る（review 側でそう扱う）
+  // データ系 → テキスト判定が「残す」でも塗る（review 側でそう扱う）。
+  // nav（ナビゲーション/メニュー）を含める理由: サイドバーメニューの機能名
+  // （「請求管理」等の辞書に無い語）が未知語として大量マスクされるのを防ぐ。
+  // トレードオフとして nav 内にユーザー名が出るUI（アカウントメニュー等）は
+  // 残ってしまうため、目視確認ステップ（確定事項3）が拾う前提
   const LABEL_TAGS = new Set(["th", "label", "caption", "legend", "button", "summary",
-    "h1", "h2", "h3", "h4", "h5", "h6"]);
+    "nav", "h1", "h2", "h3", "h4", "h5", "h6"]);
   const DATA_TAGS = new Set(["td", "output"]);
-  const LABEL_ROLES = new Set(["button", "columnheader", "rowheader", "heading", "tab"]);
+  const LABEL_ROLES = new Set(["button", "columnheader", "rowheader", "heading", "tab",
+    "navigation", "menu", "menubar", "menuitem"]);
   const DATA_ROLES = new Set(["cell", "gridcell"]);
   // 中身をテキストとして読めない描画要素（確定事項10）
   const OPAQUE_TAGS = new Set(["img", "canvas", "svg", "video", "picture"]);
