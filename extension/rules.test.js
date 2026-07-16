@@ -156,3 +156,84 @@ test("digit-run: 同一行のメールと電話が別 reason で共存する", (
   assert.equal(hits.get(4), "digit-run");
   assert.equal(hits.get(7), "digit-run", "電話番号内の区切り - も塗られること");
 });
+
+// ---- findKanjiNameRunIndices（Issue #10 事象1: 漢字名ラン検出） ----
+// kuromoji の実出力（本ファイル冒頭のテストと同様、実測値ベース）を模した
+// 疑似トークンで検証する
+const runUnit = (surface, pos, detail, word_type = "KNOWN") => ({
+  text: surface,
+  token: { surface_form: surface, pos, pos_detail_1: detail, word_type },
+});
+const spaceUnit = () => runUnit(" ", "記号", "空白", "UNKNOWN");
+const { findKanjiNameRunIndices } = globalThis.Mask2GeminiRules;
+
+test("kanji-run: 王偉（1字名詞・一般 + 形容詞・自立）を検出する", () => {
+  const units = [runUnit("王", "名詞", "一般"), runUnit("偉", "形容詞", "自立")];
+  const result = findKanjiNameRunIndices(units);
+  assert.deepEqual([...result.keys()], [0, 1]);
+  assert.equal(result.get(0), "kanji-run");
+});
+
+test("kanji-run: 空白を挟んだ「王 偉」もランを切らず空白ごと検出する", () => {
+  // kuromoji は半角/全角スペースを独立トークン（記号/空白）にする（実測）
+  const units = [runUnit("王", "名詞", "固有名詞"), spaceUnit(), runUnit("偉", "形容詞", "自立")];
+  const result = findKanjiNameRunIndices(units);
+  assert.deepEqual([...result.keys()], [0, 1, 2], "姓名間の空白も含めて塗る（隙間の塗り残し防止）");
+});
+
+test("kanji-run: 陳建国（固有名詞アンカー + サ変接続）を検出する", () => {
+  const units = [runUnit("陳", "名詞", "固有名詞"), runUnit("建国", "名詞", "サ変接続")];
+  assert.equal(findKanjiNameRunIndices(units).size, 2);
+});
+
+test("kanji-run: 顧客管理（2字+2字の一般語複合・アンカー無し）は検出しない", () => {
+  const units = [runUnit("顧客", "名詞", "一般"), runUnit("管理", "名詞", "サ変接続")];
+  assert.equal(findKanjiNameRunIndices(units).size, 0);
+});
+
+test("kanji-run: 接尾辞はメンバーにならずランを切る（承認者・東京都・営業部）", () => {
+  for (const [a, ad, b, bd] of [
+    ["承認", "サ変接続", "者", "接尾"],
+    ["東京", "固有名詞", "都", "接尾"],
+    ["営業", "サ変接続", "部", "接尾"],
+  ]) {
+    const units = [runUnit(a, "名詞", ad), runUnit(b, "名詞", bd)];
+    assert.equal(findKanjiNameRunIndices(units).size, 0, `${a}${b} は塗らない`);
+  }
+});
+
+test("kanji-run: 接頭詞・数はメンバーにならない（第二営業部）", () => {
+  const units = [
+    runUnit("第", "接頭詞", "数接続"), runUnit("二", "名詞", "数"),
+    runUnit("営業", "名詞", "サ変接続"), runUnit("部", "名詞", "接尾"),
+  ];
+  assert.equal(findKanjiNameRunIndices(units).size, 0);
+});
+
+test("kanji-run: 漢字合計5文字以上の連結は複合名詞とみなし検出しない", () => {
+  const units = [
+    runUnit("王", "名詞", "一般"), runUnit("偉", "形容詞", "自立"),
+    runUnit("委員会", "名詞", "一般"), // 合計 5 文字
+  ];
+  assert.equal(findKanjiNameRunIndices(units).size, 0);
+});
+
+test("kanji-run: 漢字以外（かな混じり・カタカナ）のトークンはランを切る", () => {
+  const units = [
+    runUnit("偉い", "形容詞", "自立"), runUnit("人", "名詞", "一般"),
+  ];
+  assert.equal(findKanjiNameRunIndices(units).size, 0, "メンバー1つでは成立しない");
+});
+
+test("kanji-run: token の無い unit（OCR単語フォールバック）はランを構成しない", () => {
+  const units = [
+    runUnit("王", "名詞", "一般"),
+    { text: "偉", token: null },
+  ];
+  assert.equal(findKanjiNameRunIndices(units).size, 0);
+});
+
+test("kanji-run: 山田 太郎（固有名詞ペア）もランになる（空白の隙間対策を兼ねる）", () => {
+  const units = [runUnit("山田", "名詞", "固有名詞"), spaceUnit(), runUnit("太郎", "名詞", "固有名詞")];
+  assert.equal(findKanjiNameRunIndices(units).size, 3);
+});

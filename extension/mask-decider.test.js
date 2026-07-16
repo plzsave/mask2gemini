@@ -8,13 +8,14 @@ require("./rules.js");
 require("./allowlist.js");
 require("./mask-decider.js");
 
-const { judge, judgeToken, findLinePatternMaskIndices, UI_LABEL_ALLOWLIST } =
-  globalThis.Mask2GeminiRules;
+const { judge, judgeToken, findLinePatternMaskIndices, findKanjiNameRunIndices,
+  UI_LABEL_ALLOWLIST } = globalThis.Mask2GeminiRules;
 const { findProtectedWordIndices } = globalThis.Mask2GeminiAllowlist;
 const { lineToUnits, decideParagraphMasks } = globalThis.Mask2GeminiMaskDecider;
 
 const baseDeps = (overrides = {}) => ({
-  judge, judgeToken, findLinePatternMaskIndices, findProtectedWordIndices,
+  judge, judgeToken, findLinePatternMaskIndices, findKanjiNameRunIndices,
+  findProtectedWordIndices,
   userTerms: [],
   labelTerms: [...UI_LABEL_ALLOWLIST],
   noiseConfidence: 35,
@@ -253,4 +254,82 @@ test("reasonColorHue: 0-359 の範囲に収まる", () => {
     const hue = reasonColorHue(r);
     assert.ok(hue >= 0 && hue < 360);
   }
+});
+
+// ---- Issue #10 事象1: 漢字名ラン（kanji-run）の統合テスト ----
+// judgeToken が「残す」判定を返す一般語トークンの連結が、文脈（人名らしきラン）で
+// 塗られること、および保護（ユーザー登録・ラベル辞書・DOMラベル・ノイズ）が
+// digit-run と違いすべて勝つことを検証する
+const kanjiUnit = (surface, pos, detail, { x0 = 0, confidence = 90, semantic = null } = {}) => ({
+  text: surface, confidence, semantic,
+  bbox: { x0, y0: 0, x1: x0 + 10, y1: 10 },
+  token: { surface_form: surface, pos, pos_detail_1: detail, word_type: "KNOWN" },
+});
+
+test("kanji-run: 王偉は judgeToken が残す判定でも塗られ、1矩形にマージされる", () => {
+  const units = [
+    kanjiUnit("王", "名詞", "一般", { x0: 0 }),
+    kanjiUnit("偉", "形容詞", "自立", { x0: 10 }),
+  ];
+  const { masks, decisions } = decideParagraphMasks(units, baseDeps());
+  assert.equal(masks.length, 1);
+  assert.equal(masks[0].reason, "kanji-run");
+  assert.equal(masks[0].text, "王偉");
+  assert.ok(decisions.every((d) => d.includes("塗:kanji-run")));
+});
+
+test("kanji-run: ユーザー登録語が勝つ（確定事項8）", () => {
+  const units = [
+    kanjiUnit("王", "名詞", "一般", { x0: 0 }),
+    kanjiUnit("偉", "形容詞", "自立", { x0: 10 }),
+  ];
+  const { masks } = decideParagraphMasks(units, baseDeps({ userTerms: ["王偉"] }));
+  assert.equal(masks.length, 0);
+});
+
+test("kanji-run: ラベル辞書のフレーズ保護が勝つ（digit-run と異なり data-like ではない）", () => {
+  const units = [
+    kanjiUnit("王", "名詞", "一般", { x0: 0 }),
+    kanjiUnit("偉", "形容詞", "自立", { x0: 10 }),
+  ];
+  const { masks, kept } = decideParagraphMasks(units, baseDeps({ labelTerms: ["王偉"] }));
+  assert.equal(masks.length, 0);
+  // judgeToken が先に「残す」を返すため kept の reason は pos:* になる
+  // （ラベル保護は kanji-run の適用を止める役割で効いている）
+  assert.equal(kept.length, 2);
+});
+
+test("kanji-run: DOM ラベル位置（semantic=label）が勝つ", () => {
+  const units = [
+    kanjiUnit("王", "名詞", "一般", { x0: 0, semantic: "label" }),
+    kanjiUnit("偉", "形容詞", "自立", { x0: 10, semantic: "label" }),
+  ];
+  const { masks } = decideParagraphMasks(units, baseDeps());
+  assert.equal(masks.length, 0);
+});
+
+test("kanji-run: 低信頼度トークン（OCRノイズ）には適用しない", () => {
+  const units = [
+    kanjiUnit("王", "名詞", "一般", { x0: 0, confidence: 2 }),
+    kanjiUnit("偉", "形容詞", "自立", { x0: 10, confidence: 2 }),
+  ];
+  const { masks } = decideParagraphMasks(units, baseDeps());
+  assert.equal(masks.length, 0);
+});
+
+test("kanji-run: 顧客管理（アンカー無しの一般語複合）は従来どおり残る", () => {
+  const units = [
+    kanjiUnit("顧客", "名詞", "一般", { x0: 0 }),
+    kanjiUnit("管理", "名詞", "サ変接続", { x0: 10 }),
+  ];
+  const { masks } = decideParagraphMasks(units, baseDeps());
+  assert.equal(masks.length, 0);
+});
+
+test("kanji-run: findKanjiNameRunIndices が deps に無い場合も動く（後方互換）", () => {
+  const units = [unit("検索")];
+  const deps = baseDeps();
+  delete deps.findKanjiNameRunIndices;
+  const { masks } = decideParagraphMasks(units, deps);
+  assert.equal(masks.length, 0);
 });

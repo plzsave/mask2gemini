@@ -3,7 +3,8 @@
 (async () => {
   "use strict";
 
-  const { judge, judgeToken, findLinePatternMaskIndices } = globalThis.Mask2GeminiRules;
+  const { judge, judgeToken, findLinePatternMaskIndices, findKanjiNameRunIndices } =
+    globalThis.Mask2GeminiRules;
   const { lineToUnits, decideParagraphMasks, reasonColorHue } = globalThis.Mask2GeminiMaskDecider;
 
   // 単語 bbox の外側に足す余白 (px)。文字の欠け対策で広めに塗る
@@ -158,7 +159,8 @@
   const labelTerms = [...globalThis.Mask2GeminiRules.UI_LABEL_ALLOWLIST];
   const { findProtectedWordIndices } = globalThis.Mask2GeminiAllowlist;
   const sharedDeps = {
-    judge, judgeToken, findLinePatternMaskIndices, findProtectedWordIndices,
+    judge, judgeToken, findLinePatternMaskIndices, findKanjiNameRunIndices,
+    findProtectedWordIndices,
     userTerms, labelTerms,
     noiseConfidence: NOISE_CONFIDENCE, maskPadding: MASK_PADDING,
   };
