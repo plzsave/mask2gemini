@@ -63,6 +63,13 @@
           <option selected>第二営業部</option>
         </select>
       </div>
+      <div>
+        <label for="f-apikey" data-check="keep">接続キー</label>
+        <!-- password の値は画面上 ●●● でしか見えない。矩形は塗られるべきだが、
+             生の値（KAgi-9973-himitsu）が抽出結果に載ってはならない
+             （E2E 側で payload に含まれないことも検証する） -->
+        <input id="f-apikey" type="password" data-check="mask" value="KAgi-9973-himitsu" size="12">
+      </div>
       <button type="button" data-check="keep">絞り込み</button>
     </form>
     <table>

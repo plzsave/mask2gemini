@@ -137,9 +137,14 @@
   const collectFormValue = (el, offset) => {
     const type = (el.getAttribute("type") ?? "").toLowerCase();
     if (["checkbox", "radio", "hidden", "range", "color", "file", "image"].includes(type)) return;
-    const text = el.localName === "select"
-      ? [...el.selectedOptions].map((o) => o.label).join(" ")
-      : (el.value ?? "");
+    // password の値は収集しない（画面には ●●● しか写らないのに生の値を
+    // storage.session・判定ログへ載せてしまうため。sensitive-data-exposure 対策）。
+    // マスク判定に値は不要で、矩形を data 扱いで塗るためのダミー文字列だけ渡す
+    const text = type === "password"
+      ? (el.value ? "●●●" : "")
+      : el.localName === "select"
+        ? [...el.selectedOptions].map((o) => o.label).join(" ")
+        : (el.value ?? "");
     if (!text.trim()) return;
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return;

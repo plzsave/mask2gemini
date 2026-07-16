@@ -101,6 +101,7 @@ async function captureAndReview(context, extensionId, fixtureRelPath, { domPath 
   return {
     checks: rects.map((r, i) => ({ ...r, orig: origBrightness[i], masked: maskedBrightness[i] })),
     statusText,
+    domExtract,
   };
 }
 
@@ -244,11 +245,14 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     // 想定ユース（社内 Web アプリの管理画面）の代表形。サイドバーナビ・タブ・
     // パンくず・フォームラベル等の「残るべき UI 骨格」が塗られたら fail する、
     // 過剰マスク検出に特化したフィクスチャ
-    const { checks, statusText } = await captureAndReview(
+    const { checks, statusText, domExtract } = await captureAndReview(
       context, extensionId, "fixtures/admin-console.html", { domPath: true });
     expect(statusText).toContain("ページ構造を解析");
     expect(checks.length).toBeGreaterThan(0);
     assertChecks(checks, "fixtures/admin-console.html (DOM)");
+    // password の生の値は抽出結果（storage.session に入るデータ）に載らないこと。
+    // 画面に見えない値の収集は目的外（sensitive-data-exposure 対策）
+    expect(JSON.stringify(domExtract)).not.toContain("KAgi-9973-himitsu");
   });
 
   test("fixtures/opaque-regions.html（DOM経路）: 読めない領域の丸塗りと要素種別判定", async ({ context, extensionId }) => {
