@@ -65,7 +65,10 @@
     ctx.fillStyle = "#000";
     for (const m of masks) ctx.fillRect(m.x, m.y, m.w, m.h);
     if (dragPreview) {
-      ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+      // Shift+ドラッグ = 範囲内一括解除。追加ドラッグ（黒半透明）と区別できる赤系で示す
+      ctx.fillStyle = dragPreview.mode === "bulk-unmask"
+        ? "rgba(220, 40, 40, 0.35)"
+        : "rgba(0, 0, 0, 0.55)";
       ctx.fillRect(dragPreview.x, dragPreview.y, dragPreview.w, dragPreview.h);
     }
   }
@@ -217,9 +220,15 @@
     };
   }
 
+  // 2つの矩形が重なっているか（Shift+ドラッグの一括解除の当たり判定用）
+  const rectsOverlap = (a, b) =>
+    a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
   let dragStart = null;
+  let dragBulkUnmask = false;
   canvas.addEventListener("pointerdown", (ev) => {
     dragStart = toImageCoords(ev);
+    dragBulkUnmask = ev.shiftKey;
     canvas.setPointerCapture(ev.pointerId);
   });
   canvas.addEventListener("pointermove", (ev) => {
@@ -230,6 +239,7 @@
       y: Math.min(dragStart.y, cur.y),
       w: Math.abs(cur.x - dragStart.x),
       h: Math.abs(cur.y - dragStart.y),
+      mode: dragBulkUnmask ? "bulk-unmask" : "add",
     };
     render();
   });
@@ -247,10 +257,20 @@
           break;
         }
       }
+    } else if (dragBulkUnmask) {
+      // Shift+ドラッグ: 矩形と重なる自動/手動マスクをまとめて解除
+      // （日付が並ぶ表やメールが列挙されたメニュー等、1件ずつのクリックが
+      //   煩雑なケースの救済。個別クリックと違いホワイトリスト提示は行わない）
+      const before = masks.length;
+      masks = masks.filter((m) => !rectsOverlap(m, dragPreview));
+      const removed = before - masks.length;
+      if (removed > 0) registerZone.replaceChildren();
     } else if (dragPreview && dragPreview.w > 2 && dragPreview.h > 2) {
-      masks.push({ ...dragPreview, source: "manual", reason: "manual" });
+      const { x, y, w, h } = dragPreview;
+      masks.push({ x, y, w, h, source: "manual", reason: "manual" });
     }
     dragStart = null;
+    dragBulkUnmask = false;
     dragPreview = null;
     render();
     renderDebugOverlay();
