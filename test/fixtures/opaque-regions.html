@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>読めない領域・要素種別判定（DOM 経路 E2E フィクスチャ）</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #fff; color: #222; padding: 24px; }
+    section { margin-bottom: 24px; }
+    table { border-collapse: collapse; font-size: 14px; }
+    th, td { border: 1px solid #d0d5da; padding: 10px 14px; text-align: left; }
+    th { background: #e8ecf1; }
+    img, canvas, iframe { display: block; border: 0; }
+  </style>
+</head>
+<body>
+  <!-- すべて架空のダミーデータ。DOM 経路（dom-extractor.js）専用の確認用:
+       確定事項10（読めない領域の丸塗り）と確定事項11（要素種別判定）をピクセルで検証する -->
+
+  <section>
+    <!-- 中身を読めない領域 → 丸塗りされるべき（明るい内容にして黒塗りを輝度で検出する） -->
+    <img data-check="mask" width="200" height="80" alt=""
+         src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='80'%3E%3Crect width='200' height='80' fill='%23f2e8c8'/%3E%3Ctext x='12' y='45' font-size='18'%3E03-9999-0000%3C/text%3E%3C/svg%3E">
+  </section>
+
+  <section>
+    <canvas data-check="mask" id="chart" width="200" height="80"></canvas>
+    <script>
+      const ctx = document.getElementById("chart").getContext("2d");
+      ctx.fillStyle = "#e8f2e8";
+      ctx.fillRect(0, 0, 200, 80);
+      ctx.fillStyle = "#333";
+      ctx.font = "16px sans-serif";
+      ctx.fillText("secret@example.com", 12, 45);
+    </script>
+  </section>
+
+  <section>
+    <!-- data: URL の iframe は opaque origin（cross-origin）→ contentDocument に
+         アクセスできず丸塗りされるべき -->
+    <iframe data-check="mask" width="200" height="80"
+            src="data:text/html,%3Cbody%20style='background:%23f5f0e0;margin:0;font:16px%20sans-serif;padding:20px'%3Ehimitsu%20naiyou%3C/body%3E"></iframe>
+  </section>
+
+  <section>
+    <!-- OPAQUE_MIN_PX（24px）未満の装飾アイコンは丸塗りしない → 残るべき -->
+    <img data-check="keep" class="small-icon" width="16" height="16" alt=""
+         src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%23e0e0f5'/%3E%3C/svg%3E">
+  </section>
+
+  <section>
+    <!-- 要素種別判定: th は辞書に無い長い見出しでも残り、td は UI ラベル語彙でも塗られる -->
+    <table>
+      <tr><th data-check="keep">対応状況ステータス区分</th></tr>
+      <tr><td data-check="mask">保存</td></tr>
+    </table>
+  </section>
+</body>
+</html>

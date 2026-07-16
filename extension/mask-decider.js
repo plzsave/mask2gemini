@@ -3,13 +3,16 @@
 (() => {
   "use strict";
 
-  // 1 行分の OCR 結果を判定単位の列に変換する。
-  // tokenizer があれば行テキストを形態素解析し、文字 (symbol) の bbox から
-  // トークン単位の矩形を組み立てる。無ければ OCR の単語単位のまま返す。
+  // 1 行分の抽出結果（OCR line または dom-extractor.js の互換 line）を
+  // 判定単位の列に変換する。tokenizer があれば行テキストを形態素解析し、
+  // 文字 (symbol) の bbox からトークン単位の矩形を組み立てる。
+  // 無ければ単語単位のまま返す。DOM 経路は line.semantic（"label"|"data"|null）を
+  // 持ち、各 unit にそのまま引き継ぐ（OCR 経路では undefined → null）。
   function lineToUnits(line, tokenizer) {
+    const semantic = line.semantic ?? null;
     if (!tokenizer) {
       return line.words.map((w) => ({
-        text: w.text, bbox: w.bbox, token: null, confidence: w.confidence,
+        text: w.text, bbox: w.bbox, token: null, confidence: w.confidence, semantic,
       }));
     }
     // 信頼度は word のものを使う（枠線等のノイズは word confidence が 0 になる。
@@ -19,7 +22,7 @@
     const lineText = symbols.map((s) => s.text).join("");
     if (lineText.length === 0) {
       return line.words.map((w) => ({
-        text: w.text, bbox: w.bbox, token: null, confidence: w.confidence,
+        text: w.text, bbox: w.bbox, token: null, confidence: w.confidence, semantic,
       }));
     }
     // 行テキストの文字位置 → symbol index の対応表（symbol が複数文字の場合に備える）
@@ -36,6 +39,7 @@
       units.push({
         text: token.surface_form,
         token,
+        semantic,
         confidence: Math.min(...ss.map((s) => s.wordConfidence)),
         bbox: {
           x0: Math.min(...ss.map((s) => s.bbox.x0)),
@@ -54,7 +58,8 @@
    * 折り返しで複数の OCR 行/段落にまたがるメールアドレス等を取りこぼさないよう
    * 十分広い範囲（現状はブロック単位。Issue #6）で units を連結して渡す。
    *
-   * @param {object[]} units lineToUnits() の出力を連結したもの
+   * @param {object[]} units lineToUnits() の出力を連結したもの。unit.semantic
+   *   （DOM 経路のみ。"label"|"data"|null）は要素種別レベルの構造判定に使う
    * @param {object} deps
    * @param {(text: string) => {mask: boolean, reason: string}} deps.judge
    * @param {(token: object) => {mask: boolean, reason: string}} deps.judgeToken
@@ -137,12 +142,26 @@
       const { mask, reason } = linePatternReason
         ? { mask: true, reason: linePatternReason }
         : unit.token ? judgeToken(unit.token) : judge(unit.text);
-      if (!mask) return decide(`残:${reason}`, reason);
-      // ラベル辞書による保護は、数字や @ を含む語・行結合で検出した語
-      // （データの可能性が高い）には効かせない
-      const isDataLike = reason === "digit" || reason === "at-mark" || Boolean(linePatternReason);
-      if (labelProtected.has(i) && !isDataLike) {
-        return decide("残:label", "label");
+      if (!mask) {
+        // DOM 構造上データ位置にある unit（td・フォーム入力値。確定事項11）は、
+        // テキスト面の判定が「残す」でも塗る（recall 優先。UI ラベル語彙と同じ
+        // 文字列がデータとして入っているケース等を落とさない）
+        if (unit.semantic === "data") {
+          decide("塗:dom-data");
+          masks.push({ ...toRect(unit.bbox, maskPadding), source: "auto", reason: "dom-data", text: unit.text });
+          return;
+        }
+        return decide(`残:${reason}`, reason);
+      }
+      // ラベル辞書・ラベル要素による保護は、数字や @ を含む語・行結合で検出した語・
+      // データ位置にある語（データの可能性が高い）には効かせない
+      const isDataLike = reason === "digit" || reason === "at-mark"
+        || Boolean(linePatternReason) || unit.semantic === "data";
+      if (!isDataLike) {
+        // DOM 構造上ラベル位置（th/label/caption/ボタン類等。確定事項11）は
+        // 辞書に無い見出し語でも残す。ラベル辞書（labelTerms）より判定が確実
+        if (unit.semantic === "label") return decide("残:dom-label", "dom-label");
+        if (labelProtected.has(i)) return decide("残:label", "label");
       }
       // 信頼度ほぼゼロの非データ語は UI 部品（枠線・罫線）の誤認識なので塗らない。
       // linePatternReason（isDataLike）があるトークンはここを必ず通り抜ける
