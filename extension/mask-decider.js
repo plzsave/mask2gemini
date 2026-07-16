@@ -75,7 +75,7 @@
 
     const userProtected = findProtectedWordIndices(units, userTerms);
     const labelProtected = findProtectedWordIndices(units, labelTerms, { fullCoverage: true });
-    // 行結合パターン判定（メールアドレス断片の結合等）は units 全体を見て
+    // 行結合パターン判定（メール断片・電話等の数字ラン。Issue #1）は units 全体を見て
     // 事前に一括確定させる。個々の unit の confidence は一切参照しない
     // （findLinePatternMaskIndices はテキストのみを見る純粋なパターン照合）。
     // Issue #3: 個別トークンの NOISE_CONFIDENCE フィルタ（後段のループ内）より
@@ -83,8 +83,9 @@
     // させること。低信頼トークンが混ざっていてもパターンとして成立していれば
     // confidence を割り引かずそのまま塗る（SPEC.md 確定事項2: recall優先。
     // 割り引くと OCR が荒れた本物の PII を見逃すリスクが増えるため採用しない）。
-    // 将来 #1（トークン単位→行単位判定への一般化）で判定単位が変わっても、
-    // この順序（行結合確定 → confidence フィルタ）は維持すること。
+    // Issue #1（トークン単位→行単位判定への一般化）は LINE_PATTERNS の拡張
+    // （digit-run 追加）として実装済み。今後パターンが増えても、この順序
+    // （行結合確定 → confidence フィルタ）は維持すること。
     const linePatternMasked = findLinePatternMaskIndices(units);
 
     // マスク矩形（padding込み）・kept矩形（padding無し）共通の座標変換
@@ -98,6 +99,30 @@
     const masks = [];
     const kept = [];
     const decisions = [];
+
+    // 行結合パターン（email / digit-run）に一致した unit は、トークンごとに
+    // 矩形を置くとトークン間の空白が塗り残る（例: "090 - 1234 - 5678" の
+    // スペース部分。桁のまとまりが読み取れてしまう）ため、同一行内で連続する
+    // 一致範囲を 1 つの矩形にマージして塗る（Issue #1: マスク単位も行の一致範囲へ）。
+    // 折り返しで別の OCR 行に分かれた断片（email-wrap）まで union すると
+    // 行間の無関係なテキストを巻き込むので、垂直方向に重なる場合のみ結合する。
+    const vOverlap = (a, b) => Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0) > 0;
+    const runs = [];
+    const addToRun = (i, unit, reason) => {
+      const last = runs[runs.length - 1];
+      if (last && last.end === i - 1 && last.reason === reason && vOverlap(last.bbox, unit.bbox)) {
+        last.end = i;
+        last.texts.push(unit.text);
+        last.bbox = {
+          x0: Math.min(last.bbox.x0, unit.bbox.x0),
+          y0: Math.min(last.bbox.y0, unit.bbox.y0),
+          x1: Math.max(last.bbox.x1, unit.bbox.x1),
+          y1: Math.max(last.bbox.y1, unit.bbox.y1),
+        };
+      } else {
+        runs.push({ start: i, end: i, reason, texts: [unit.text], bbox: { ...unit.bbox } });
+      }
+    };
     units.forEach((unit, i) => {
       // reason を渡すと、非マスクトークンとして kept にも記録する
       // （デバッグオーバーレイ用。マスクした場合は reason 省略で masks 側にのみ積む）
@@ -127,8 +152,18 @@
         return decide(`残:${noiseReason}`, noiseReason);
       }
       decide(`塗:${reason}`);
+      if (linePatternReason) {
+        addToRun(i, unit, reason);
+        return;
+      }
       masks.push({ ...toRect(unit.bbox, maskPadding), source: "auto", reason, text: unit.text });
     });
+    for (const run of runs) {
+      masks.push({
+        ...toRect(run.bbox, maskPadding), source: "auto", reason: run.reason,
+        text: run.texts.join(""),
+      });
+    }
     return { masks, kept, decisions };
   }
 
