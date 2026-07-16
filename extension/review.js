@@ -1,4 +1,5 @@
-// 確認画面: 撮影画像の表示 → OCR → 自動マスク → 手動編集 → コピー/Gemini
+// 確認画面: 撮影画像の表示 → テキスト抽出（DOM 優先・OCR フォールバック）
+// → 自動マスク → 手動編集 → コピー/Gemini
 (async () => {
   "use strict";
 
@@ -36,7 +37,8 @@
   });
 
   // ---- 撮影データの取得 ----
-  const { capture, captureError } = await chrome.storage.session.get(["capture", "captureError"]);
+  const { capture, captureError, domExtract, domExtractError } =
+    await chrome.storage.session.get(["capture", "captureError", "domExtract", "domExtractError"]);
   if (!capture) {
     setStatus(`撮影データがありません。対象タブで拡張アイコンを押し直してください。${captureError ? ` (${captureError})` : ""}`);
     return;
@@ -138,72 +140,127 @@
     }
   });
 
-  // ---- OCR → 自動マスク ----
-  setStatus("OCR エンジンを起動中…");
-  const vendorUrl = (p) => chrome.runtime.getURL(`vendor/${p}`);
-  const worker = await Tesseract.createWorker(["jpn", "eng"], Tesseract.OEM.LSTM_ONLY, {
-    workerPath: vendorUrl("tesseract/worker.min.js"),
-    corePath: vendorUrl("core"),
-    langPath: vendorUrl("lang"),
-    workerBlobURL: false, // 拡張ページの CSP (script-src 'self') と整合させる
-    gzip: true,
-    logger: (m) => {
-      if (m.status === "recognizing text") {
-        setStatus(`文字を読み取り中… ${Math.round(m.progress * 100)}%`);
-      }
-    },
-  });
+  // ---- テキスト抽出 → 自動マスク（DOM 優先・OCR フォールバック。確定事項9） ----
+  // ユーザーホワイトリスト（自動ルールより優先。行単位のフレーズ照合）
+  const userTerms = await globalThis.Mask2GeminiAllowlist.load();
+  // 組み込み UI ラベル辞書にも同じフレーズ照合を使う。
+  // 分割が語彙と食い違っても（「メール|アドレス」「保|存」）一致させるため
+  const labelTerms = [...globalThis.Mask2GeminiRules.UI_LABEL_ALLOWLIST];
+  const { findProtectedWordIndices } = globalThis.Mask2GeminiAllowlist;
+  const sharedDeps = {
+    judge, judgeToken, findLinePatternMaskIndices, findProtectedWordIndices,
+    userTerms, labelTerms,
+    noiseConfidence: NOISE_CONFIDENCE, maskPadding: MASK_PADDING,
+  };
 
-  try {
-    await worker.setParameters({ tessedit_pageseg_mode: PAGE_SEG_MODE });
-    setStatus("文字を読み取り中…");
+  const applyDecided = ({ masks: newMasks, kept, decisions }) => {
+    masks.push(...newMasks);
+    allKept.push(...kept);
+    // 塗りすぎ・塗り漏れ調査用。確認画面の DevTools コンソールで確認できる
+    console.debug("[mask2gemini]", decisions.join(" | "));
+  };
 
-    // 認識精度向上のため拡大してから OCR にかける（座標は後で OCR_SCALE で割り戻す）
-    const upscaled = document.createElement("canvas");
-    upscaled.width = image.naturalWidth * OCR_SCALE;
-    upscaled.height = image.naturalHeight * OCR_SCALE;
-    upscaled.getContext("2d").drawImage(image, 0, 0, upscaled.width, upscaled.height);
+  let route = "OCR";
+  if (domExtract?.viewport?.w > 0 && domExtract?.viewport?.h > 0) {
+    // dom-extractor.js の座標は CSS px。画像 px への係数は「画像サイズ ÷ viewport
+    // サイズ」で出す（devicePixelRatio・ページズームをまとめて吸収する）
+    const sx = image.naturalWidth / domExtract.viewport.w;
+    const sy = image.naturalHeight / domExtract.viewport.h;
+    const scaleBbox = ({ x0, y0, x1, y1 }) => ({ x0: x0 * sx, y0: y0 * sy, x1: x1 * sx, y1: y1 * sy });
 
-    const { data } = await worker.recognize(upscaled, {}, { blocks: true });
-
-    setStatus("マスク位置を計算中…");
-    const tokenizer = await tokenizerPromise;
-
-    // ユーザーホワイトリスト（自動ルールより優先。行単位のフレーズ照合）
-    const userTerms = await globalThis.Mask2GeminiAllowlist.load();
-    // 組み込み UI ラベル辞書にも同じフレーズ照合を使う。
-    // 分割が語彙と食い違っても（「メール|アドレス」「保|存」）一致させるため
-    const labelTerms = [...globalThis.Mask2GeminiRules.UI_LABEL_ALLOWLIST];
-    const { findProtectedWordIndices } = globalThis.Mask2GeminiAllowlist;
-
-    for (const block of data.blocks ?? []) {
-      // メールアドレス等は、折り返しで視覚的に複数の OCR 行へまたがることがある
-      // （例: 狭い列幅で word-break: break-all のように途中改行される）。
-      // Tesseract は行だけでなく段落(paragraph)の境界でもこうした折り返しを
-      // 分割することがあり（Issue #6）、段落単位の結合では救えないケースが
-      // 残ったため、パターン照合・アローリスト照合はブロック(block)全体を
-      // 結合して行う。判定単位（unit）自体は元の OCR 行ごとの bbox を保持したまま使う。
-      // recall 優先方針（SPEC.md 確定事項2）のもと、結合範囲が広がることで
-      // 無関係なテキスト同士が偶然パターンに一致するリスクより、断片の
-      // 塗り漏れを防ぐことを優先する
-      const units = block.paragraphs.flatMap((para) =>
-        para.lines.flatMap((line) => lineToUnits(line, tokenizer)));
-      const { masks: blockMasks, kept: blockKept, decisions } = decideParagraphMasks(units, {
-        judge, judgeToken, findLinePatternMaskIndices, findProtectedWordIndices,
-        userTerms, labelTerms,
-        noiseConfidence: NOISE_CONFIDENCE, ocrScale: OCR_SCALE, maskPadding: MASK_PADDING,
+    // 中身を読めない領域（cross-origin iframe・canvas・img 等）は丸塗り（確定事項10）。
+    // text を持たないため、クリック解除してもホワイトリスト登録は提示されない
+    for (const o of domExtract.opaque ?? []) {
+      masks.push({
+        x: o.x * sx, y: o.y * sy, w: o.w * sx, h: o.h * sy,
+        source: "auto", reason: `opaque(${o.kind})`,
       });
-      masks.push(...blockMasks);
-      allKept.push(...blockKept);
-      // 塗りすぎ・塗り漏れ調査用。確認画面の DevTools コンソールで確認できる
-      console.debug("[mask2gemini]", decisions.join(" | "));
     }
-    render();
-    renderDebugOverlay();
-    setStatus(`自動マスク ${masks.length} 件。目視で確認し、過不足を直してください。`);
-  } finally {
-    await worker.terminate();
+
+    if (domExtract.lines?.length) {
+      route = "DOM";
+      setStatus("マスク位置を計算中…");
+      const tokenizer = await tokenizerPromise;
+      // フレーズ照合・行結合パターンの結合範囲はブロック（非インライン祖先）単位。
+      // OCR 経路の block 結合（Issue #6）に相当し、インライン要素で分割された
+      // 語句（株式会社<b>ABC</b> 等）のホワイトリスト照合を通す
+      const byBlock = new Map();
+      for (const line of domExtract.lines) {
+        if (!byBlock.has(line.blockId)) byBlock.set(line.blockId, []);
+        byBlock.get(line.blockId).push(line);
+      }
+      for (const blockLines of byBlock.values()) {
+        const units = blockLines.flatMap((line) => lineToUnits({
+          semantic: line.semantic,
+          words: line.words.map((w) => ({
+            text: w.text, confidence: w.confidence,
+            bbox: scaleBbox(w.bbox),
+            symbols: w.symbols?.map((s) => ({ text: s.text, bbox: scaleBbox(s.bbox) })) ?? null,
+          })),
+        }, tokenizer));
+        applyDecided(decideParagraphMasks(units, { ...sharedDeps, ocrScale: 1 }));
+      }
+    }
   }
+
+  if (route === "OCR") {
+    // DOM 抽出が無い/空のときのフォールバック（確定事項9）。撮影対象が
+    // chrome:// や PDF 等で注入できなかったケースと、テキストの無いページ
+    if (domExtractError) {
+      console.debug("[mask2gemini] DOM 抽出不可のため OCR にフォールバック:", domExtractError);
+    }
+    setStatus("OCR エンジンを起動中…");
+    const vendorUrl = (p) => chrome.runtime.getURL(`vendor/${p}`);
+    const worker = await Tesseract.createWorker(["jpn", "eng"], Tesseract.OEM.LSTM_ONLY, {
+      workerPath: vendorUrl("tesseract/worker.min.js"),
+      corePath: vendorUrl("core"),
+      langPath: vendorUrl("lang"),
+      workerBlobURL: false, // 拡張ページの CSP (script-src 'self') と整合させる
+      gzip: true,
+      logger: (m) => {
+        if (m.status === "recognizing text") {
+          setStatus(`文字を読み取り中… ${Math.round(m.progress * 100)}%`);
+        }
+      },
+    });
+
+    try {
+      await worker.setParameters({ tessedit_pageseg_mode: PAGE_SEG_MODE });
+      setStatus("文字を読み取り中…");
+
+      // 認識精度向上のため拡大してから OCR にかける（座標は後で OCR_SCALE で割り戻す）
+      const upscaled = document.createElement("canvas");
+      upscaled.width = image.naturalWidth * OCR_SCALE;
+      upscaled.height = image.naturalHeight * OCR_SCALE;
+      upscaled.getContext("2d").drawImage(image, 0, 0, upscaled.width, upscaled.height);
+
+      const { data } = await worker.recognize(upscaled, {}, { blocks: true });
+
+      setStatus("マスク位置を計算中…");
+      const tokenizer = await tokenizerPromise;
+
+      for (const block of data.blocks ?? []) {
+        // メールアドレス等は、折り返しで視覚的に複数の OCR 行へまたがることがある
+        // （例: 狭い列幅で word-break: break-all のように途中改行される）。
+        // Tesseract は行だけでなく段落(paragraph)の境界でもこうした折り返しを
+        // 分割することがあり（Issue #6）、段落単位の結合では救えないケースが
+        // 残ったため、パターン照合・アローリスト照合はブロック(block)全体を
+        // 結合して行う。判定単位（unit）自体は元の OCR 行ごとの bbox を保持したまま使う。
+        // recall 優先方針（SPEC.md 確定事項2）のもと、結合範囲が広がることで
+        // 無関係なテキスト同士が偶然パターンに一致するリスクより、断片の
+        // 塗り漏れを防ぐことを優先する
+        const units = block.paragraphs.flatMap((para) =>
+          para.lines.flatMap((line) => lineToUnits(line, tokenizer)));
+        applyDecided(decideParagraphMasks(units, { ...sharedDeps, ocrScale: OCR_SCALE }));
+      }
+    } finally {
+      await worker.terminate();
+    }
+  }
+
+  render();
+  renderDebugOverlay();
+  setStatus(`自動マスク ${masks.length} 件（${route === "DOM" ? "ページ構造を解析" : "画像から文字認識"}）。目視で確認し、過不足を直してください。`);
 
   btnCopyImage.disabled = false;
   btnCopyPrompt.disabled = false;

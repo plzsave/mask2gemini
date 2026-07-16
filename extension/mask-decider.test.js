@@ -24,8 +24,8 @@ const baseDeps = (overrides = {}) => ({
 });
 
 // bbox は OCR_SCALE=2 前提の座標系で組み立てる（テスト用の簡易値）
-const unit = (text, { confidence = 90, x0 = 0 } = {}) => ({
-  text, confidence, bbox: { x0, y0: 0, x1: x0 + 10, y1: 10 }, token: null,
+const unit = (text, { confidence = 90, x0 = 0, semantic = null } = {}) => ({
+  text, confidence, bbox: { x0, y0: 0, x1: x0 + 10, y1: 10 }, token: null, semantic,
 });
 
 test("lineToUnits: tokenizer が無ければ OCR word 単位のまま返す", () => {
@@ -34,6 +34,63 @@ test("lineToUnits: tokenizer が無ければ OCR word 単位のまま返す", ()
   assert.equal(units.length, 1);
   assert.equal(units[0].text, "保存");
   assert.equal(units[0].token, null);
+});
+
+test("lineToUnits: line.semantic は各 unit に引き継がれる（DOM 経路。tokenizer 無し）", () => {
+  const line = {
+    semantic: "data",
+    words: [{ text: "山田太郎", bbox: { x0: 0, y0: 0, x1: 40, y1: 10 }, confidence: 100 }],
+  };
+  const units = lineToUnits(line, null);
+  assert.equal(units[0].semantic, "data");
+});
+
+test("lineToUnits: OCR 経路（semantic 無し）の unit は semantic=null になる", () => {
+  const line = { words: [{ text: "保存", bbox: { x0: 0, y0: 0, x1: 10, y1: 10 }, confidence: 90 }] };
+  assert.equal(lineToUnits(line, null)[0].semantic, null);
+});
+
+// ---- 確定事項11: DOM 要素種別レベルの構造判定 ----
+
+test("decideParagraphMasks: semantic=data はテキスト判定が「残す」でも塗る（td 内の UI ラベル語等）", () => {
+  // 「保存」は UI ラベル辞書にあり judge では残る判定だが、td 内にあるならデータ
+  const units = [unit("保存", { semantic: "data" })];
+  const { masks, decisions } = decideParagraphMasks(units, baseDeps());
+  assert.equal(masks.length, 1);
+  assert.equal(masks[0].reason, "dom-data");
+  assert.ok(decisions[0].includes("塗:dom-data"));
+});
+
+test("decideParagraphMasks: semantic=label は辞書に無い見出し語でも残す", () => {
+  // "Widgetzone" は judge では ascii-word として塗られるが、th/ボタン内なら残す
+  const units = [unit("Widgetzone", { semantic: "label" })];
+  const { masks, kept } = decideParagraphMasks(units, baseDeps());
+  assert.equal(masks.length, 0);
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].reason, "dom-label");
+});
+
+test("decideParagraphMasks: semantic=label でも数字を含む語は塗る（isDataLike が保護に勝つ）", () => {
+  const units = [unit("2024年度", { semantic: "label" })];
+  const { masks } = decideParagraphMasks(units, baseDeps());
+  assert.equal(masks.length, 1);
+  assert.match(masks[0].reason, /^digit/); // digit または digit-run（行結合が先に拾う）
+});
+
+test("decideParagraphMasks: ユーザー登録語は semantic=data より優先して残る（確定事項8）", () => {
+  const units = [unit("株式会社ABC", { semantic: "data" })];
+  const { masks, kept } = decideParagraphMasks(units, baseDeps({ userTerms: ["株式会社ABC"] }));
+  assert.equal(masks.length, 0);
+  assert.equal(kept[0].reason, "user");
+});
+
+test("decideParagraphMasks: semantic=data はテキスト判定で塗られる場合も通常の reason で塗る", () => {
+  // dom-data は「構造だけが根拠」のときの reason。テキスト自体がデータらしい場合は
+  // 本来の reason（デバッグオーバーレイでの原因追跡用）を保つ
+  const units = [unit("foo@bar.com", { semantic: "data" })];
+  const { masks } = decideParagraphMasks(units, baseDeps());
+  assert.equal(masks.length, 1);
+  assert.equal(masks[0].reason, "email");
 });
 
 test("decideParagraphMasks: 断片化したメールは行(段落)結合で1つの矩形として塗られる", () => {

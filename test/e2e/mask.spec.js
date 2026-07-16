@@ -7,10 +7,18 @@
 // マスク矩形のピクセルで判定するため、OCR のブレに強い。
 "use strict";
 const path = require("node:path");
+const fs = require("node:fs");
 const { test: base, chromium, expect } = require("@playwright/test");
 
 const EXTENSION_PATH = path.join(__dirname, "..", "..", "extension");
 const TEST_DIR = path.join(__dirname, "..");
+
+// DOM 経路テスト用: dom-extractor.js を fixture ページ内で評価して抽出結果を得る。
+// 実運用では background.js が chrome.scripting.executeScript で注入するが、
+// Playwright から拡張のアイコンクリックは起こせないため、既存テストが capture を
+// storage.session に直接注入しているのと同じ流儀で domExtract も注入する
+const DOM_EXTRACTOR_SOURCE = fs.readFileSync(
+  path.join(EXTENSION_PATH, "dom-extractor.js"), "utf8");
 
 const test = base.extend({
   context: async ({}, use) => {
@@ -34,7 +42,8 @@ const test = base.extend({
 // fixture ページを開いてスクリーンショットを撮り、拡張の確認画面(review.html)に
 // 撮影データとして渡した上で、自動マスク完了まで待つ。
 // data-check 要素の座標はスクリーンショットと同じ座標系（スクロール無し前提）で返す。
-async function captureAndReview(context, extensionId, fixtureRelPath) {
+// domPath: true なら dom-extractor.js の抽出結果も注入し、DOM 経路で処理させる
+async function captureAndReview(context, extensionId, fixtureRelPath, { domPath = false } = {}) {
   const fixturePage = await context.newPage();
   await fixturePage.setViewportSize({ width: 1280, height: 900 });
   await fixturePage.goto(`file://${path.join(TEST_DIR, fixtureRelPath)}`);
@@ -42,19 +51,26 @@ async function captureAndReview(context, extensionId, fixtureRelPath) {
   // td/div 等のブロック要素は列幅・親要素の幅に合わせて padding の外側まで
   // 広がるため、getBoundingClientRect() をそのまま使うと実際の文字グリフより
   // 広い範囲（余白）をサンプリングしてしまう。Range で文字ノードそのものの
-  // 矩形を取り、OCR が実際に検出する範囲に近づける
+  // 矩形を取り、OCR が実際に検出する範囲に近づける。テキストを持たない要素
+  // （img/canvas/iframe 等、丸塗り対象）は要素矩形をそのまま使う
   const rects = await fixturePage.$$eval("[data-check]", (els) =>
     els.map((el) => {
       const range = document.createRange();
       range.selectNodeContents(el);
-      const r = range.getBoundingClientRect();
+      let r = range.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) r = el.getBoundingClientRect();
       return {
         check: el.dataset.check,
         knownIssue: el.dataset.knownIssue || null,
-        text: el.textContent.trim() || el.className,
+        text: el.textContent.trim() || el.className || el.tagName.toLowerCase(),
         x: r.x, y: r.y, w: r.width, h: r.height,
       };
     }));
+
+  // page.evaluate(文字列) はテスト対象リポジトリ内の固定ソース
+  // （extension/dom-extractor.js）をそのまま実行するだけで、外部入力・動的生成
+  // コードは評価しない（sw.evaluate と同じ整理。eval 相当だが対象は自前コードのみ）
+  const domExtract = domPath ? await fixturePage.evaluate(DOM_EXTRACTOR_SOURCE) : null;
 
   const screenshot = await fixturePage.screenshot();
   const dataUrl = `data:image/png;base64,${screenshot.toString("base64")}`;
@@ -69,18 +85,22 @@ async function captureAndReview(context, extensionId, fixtureRelPath) {
   // Worker.evaluate() は Playwright のテスト API（対象ワーカー内でコードを実行し
   // 結果をシリアライズして返す）。JS の eval() とは無関係で、テスト対象の
   // 拡張機能サービスワーカーへ既知の固定コードを注入するだけの用途
-  await sw.evaluate(async (url) => {
+  await sw.evaluate(async ({ url, domExtract }) => {
+    await chrome.storage.session.remove(["capture", "captureError", "domExtract", "domExtractError"]);
     await chrome.storage.session.set({ capture: { dataUrl: url } });
-  }, dataUrl);
+    if (domExtract) await chrome.storage.session.set({ domExtract });
+  }, { url: dataUrl, domExtract });
 
   const reviewPage = await context.newPage();
   await reviewPage.goto(`chrome-extension://${extensionId}/review.html`);
   await reviewPage.locator("#status").filter({ hasText: "自動マスク" }).waitFor({ timeout: 100_000 });
 
   const maskedBrightness = await reviewPage.evaluate(sampleCanvasRects, { rects });
+  const statusText = await reviewPage.locator("#status").textContent();
 
   return {
     checks: rects.map((r, i) => ({ ...r, orig: origBrightness[i], masked: maskedBrightness[i] })),
+    statusText,
   };
 }
 
@@ -188,6 +208,31 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     const { checks } = await captureAndReview(context, extensionId, "fixtures/noise-borders.html");
     expect(checks.length).toBeGreaterThan(0);
     assertChecks(checks);
+  });
+
+  // ---- DOM 経路（Issue #13）。OCR を使わないため実行は数秒で終わる ----
+
+  test("fixture.html（DOM経路）: OCR と同じ期待結果を DOM 抽出で満たす", async ({ context, extensionId }) => {
+    const { checks, statusText } = await captureAndReview(
+      context, extensionId, "fixture.html", { domPath: true });
+    expect(statusText).toContain("ページ構造を解析");
+    expect(checks.length).toBeGreaterThan(0);
+    assertChecks(checks);
+  });
+
+  test("fixtures/opaque-regions.html（DOM経路）: 読めない領域の丸塗りと要素種別判定", async ({ context, extensionId }) => {
+    const { checks, statusText } = await captureAndReview(
+      context, extensionId, "fixtures/opaque-regions.html", { domPath: true });
+    expect(statusText).toContain("ページ構造を解析");
+    expect(checks.length).toBeGreaterThan(0);
+    assertChecks(checks);
+  });
+
+  test("OCRフォールバック: domExtract が無ければ従来経路のステータスになる", async ({ context, extensionId }) => {
+    // 既存の OCR テスト群がフォールバック経路の本体を回帰確認している。
+    // ここでは経路表示（確定事項9: どちらを使ったかをステータスに出す）だけを見る
+    const { statusText } = await captureAndReview(context, extensionId, "fixture.html");
+    expect(statusText).toContain("画像から文字認識");
   });
 
   // Issue #4: デバッグオーバーレイは #debug-overlay という別 canvas に描画され、
