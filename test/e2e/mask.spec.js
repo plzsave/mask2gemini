@@ -101,6 +101,7 @@ async function captureAndReview(context, extensionId, fixtureRelPath, { domPath 
   return {
     checks: rects.map((r, i) => ({ ...r, orig: origBrightness[i], masked: maskedBrightness[i] })),
     statusText,
+    domExtract,
   };
 }
 
@@ -160,7 +161,27 @@ async function sampleCanvasRects({ rects }) {
 // 追跡中のもの。ここで hard failure にすると常時 red なテストスイートになり
 // 新規デグレのシグナルが埋もれるため、警告ログのみ出して assertion はスキップする。
 // 挙動が直ったら data-known-issue を外し、通常の assertion に戻すこと。
-function assertChecks(checks) {
+// マスク判定の閾値（assertChecks と集計で共有）。黒塗りは輝度 0 近辺まで落ちる
+const MASKED_MAX_BRIGHTNESS = 40;
+const KEEP_MAX_BRIGHTNESS_DELTA = 20;
+
+// 過剰マスク/塗り漏れの定量サマリ。pass/fail の binary だけでなく、ルール変更の
+// 影響（keep 違反 = 過剰マスク、mask 違反 = 塗り漏れ）を件数で追えるようにする。
+// known-issue の要素も件数には含める（追跡中の違反も母数として見えるべきため）
+function reportViolations(label, checks) {
+  const keep = checks.filter((c) => c.check === "keep");
+  const mask = checks.filter((c) => c.check === "mask");
+  const keepViolations = keep.filter((c) => Math.abs(c.masked - c.orig) >= KEEP_MAX_BRIGHTNESS_DELTA);
+  const maskViolations = mask.filter((c) => c.masked >= MASKED_MAX_BRIGHTNESS);
+  console.log(
+    `[coverage] ${label}: 過剰マスク ${keepViolations.length}/${keep.length}`
+    + `、塗り漏れ ${maskViolations.length}/${mask.length}`
+    + (keepViolations.length ? ` | 過剰: ${keepViolations.map((c) => `「${c.text}」`).join(" ")}` : "")
+    + (maskViolations.length ? ` | 漏れ: ${maskViolations.map((c) => `「${c.text}」`).join(" ")}` : ""));
+}
+
+function assertChecks(checks, label = "") {
+  if (label) reportViolations(label, checks);
   for (const c of checks) {
     if (c.knownIssue) {
       const drop = c.orig - c.masked;
@@ -171,10 +192,10 @@ function assertChecks(checks) {
     }
     if (c.check === "mask") {
       expect(c.masked, `「${c.text}」は黒塗りされているべき（元輝度 ${c.orig} → マスク後 ${c.masked}）`)
-        .toBeLessThan(40);
+        .toBeLessThan(MASKED_MAX_BRIGHTNESS);
     } else {
       expect(Math.abs(c.masked - c.orig), `「${c.text}」は残っているべき（元輝度 ${c.orig} → マスク後 ${c.masked}）`)
-        .toBeLessThan(20);
+        .toBeLessThan(KEEP_MAX_BRIGHTNESS_DELTA);
     }
   }
 }
@@ -183,31 +204,31 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
   test("fixture.html: 顧客管理画面の基本ケース", async ({ context, extensionId }) => {
     const { checks } = await captureAndReview(context, extensionId, "fixture.html");
     expect(checks.length).toBeGreaterThan(0);
-    assertChecks(checks);
+    assertChecks(checks, "fixture.html (OCR)");
   });
 
   test("fixtures/email-wrap.html: 折り返しメールも全断片が塗られる", async ({ context, extensionId }) => {
     const { checks } = await captureAndReview(context, extensionId, "fixtures/email-wrap.html");
     expect(checks.length).toBeGreaterThan(0);
-    assertChecks(checks);
+    assertChecks(checks, "fixtures/email-wrap.html (OCR)");
   });
 
   test("fixtures/unknown-ui-labels.html: 辞書内の一般語は残る", async ({ context, extensionId }) => {
     const { checks } = await captureAndReview(context, extensionId, "fixtures/unknown-ui-labels.html");
     expect(checks.length).toBeGreaterThan(0);
-    assertChecks(checks);
+    assertChecks(checks, "fixtures/unknown-ui-labels.html (OCR)");
   });
 
   test("fixtures/phone-postal-formats.html: 電話・郵便番号は区切り文字ごと塗られる", async ({ context, extensionId }) => {
     const { checks } = await captureAndReview(context, extensionId, "fixtures/phone-postal-formats.html");
     expect(checks.length).toBeGreaterThan(0);
-    assertChecks(checks);
+    assertChecks(checks, "fixtures/phone-postal-formats.html (OCR)");
   });
 
   test("fixtures/noise-borders.html: 装飾要素・罫線は誤マスクされない", async ({ context, extensionId }) => {
     const { checks } = await captureAndReview(context, extensionId, "fixtures/noise-borders.html");
     expect(checks.length).toBeGreaterThan(0);
-    assertChecks(checks);
+    assertChecks(checks, "fixtures/noise-borders.html (OCR)");
   });
 
   // ---- DOM 経路（Issue #13）。OCR を使わないため実行は数秒で終わる ----
@@ -217,7 +238,21 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
       context, extensionId, "fixture.html", { domPath: true });
     expect(statusText).toContain("ページ構造を解析");
     expect(checks.length).toBeGreaterThan(0);
-    assertChecks(checks);
+    assertChecks(checks, "fixture.html (DOM)");
+  });
+
+  test("fixtures/admin-console.html（DOM経路）: 管理画面のUI骨格が過剰マスクされない", async ({ context, extensionId }) => {
+    // 想定ユース（社内 Web アプリの管理画面）の代表形。サイドバーナビ・タブ・
+    // パンくず・フォームラベル等の「残るべき UI 骨格」が塗られたら fail する、
+    // 過剰マスク検出に特化したフィクスチャ
+    const { checks, statusText, domExtract } = await captureAndReview(
+      context, extensionId, "fixtures/admin-console.html", { domPath: true });
+    expect(statusText).toContain("ページ構造を解析");
+    expect(checks.length).toBeGreaterThan(0);
+    assertChecks(checks, "fixtures/admin-console.html (DOM)");
+    // password の生の値は抽出結果（storage.session に入るデータ）に載らないこと。
+    // 画面に見えない値の収集は目的外（sensitive-data-exposure 対策）
+    expect(JSON.stringify(domExtract)).not.toContain("KAgi-9973-himitsu");
   });
 
   test("fixtures/opaque-regions.html（DOM経路）: 読めない領域の丸塗りと要素種別判定", async ({ context, extensionId }) => {
@@ -225,7 +260,7 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
       context, extensionId, "fixtures/opaque-regions.html", { domPath: true });
     expect(statusText).toContain("ページ構造を解析");
     expect(checks.length).toBeGreaterThan(0);
-    assertChecks(checks);
+    assertChecks(checks, "fixtures/opaque-regions.html (DOM)");
   });
 
   test("OCRフォールバック: domExtract が無ければ従来経路のステータスになる", async ({ context, extensionId }) => {

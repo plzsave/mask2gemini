@@ -24,11 +24,16 @@
   const OPAQUE_MIN_PX = 24;
 
   // 確定事項11: 要素種別レベルの構造判定。ラベル系 → 残す方向の保護、
-  // データ系 → テキスト判定が「残す」でも塗る（review 側でそう扱う）
+  // データ系 → テキスト判定が「残す」でも塗る（review 側でそう扱う）。
+  // nav（ナビゲーション/メニュー）を含める理由: サイドバーメニューの機能名
+  // （「請求管理」等の辞書に無い語）が未知語として大量マスクされるのを防ぐ。
+  // トレードオフとして nav 内にユーザー名が出るUI（アカウントメニュー等）は
+  // 残ってしまうため、目視確認ステップ（確定事項3）が拾う前提
   const LABEL_TAGS = new Set(["th", "label", "caption", "legend", "button", "summary",
-    "h1", "h2", "h3", "h4", "h5", "h6"]);
+    "nav", "h1", "h2", "h3", "h4", "h5", "h6"]);
   const DATA_TAGS = new Set(["td", "output"]);
-  const LABEL_ROLES = new Set(["button", "columnheader", "rowheader", "heading", "tab"]);
+  const LABEL_ROLES = new Set(["button", "columnheader", "rowheader", "heading", "tab",
+    "navigation", "menu", "menubar", "menuitem"]);
   const DATA_ROLES = new Set(["cell", "gridcell"]);
   // 中身をテキストとして読めない描画要素（確定事項10）
   const OPAQUE_TAGS = new Set(["img", "canvas", "svg", "video", "picture"]);
@@ -132,9 +137,14 @@
   const collectFormValue = (el, offset) => {
     const type = (el.getAttribute("type") ?? "").toLowerCase();
     if (["checkbox", "radio", "hidden", "range", "color", "file", "image"].includes(type)) return;
-    const text = el.localName === "select"
-      ? [...el.selectedOptions].map((o) => o.label).join(" ")
-      : (el.value ?? "");
+    // password の値は収集しない（画面には ●●● しか写らないのに生の値を
+    // storage.session・判定ログへ載せてしまうため。sensitive-data-exposure 対策）。
+    // マスク判定に値は不要で、矩形を data 扱いで塗るためのダミー文字列だけ渡す
+    const text = type === "password"
+      ? (el.value ? "●●●" : "")
+      : el.localName === "select"
+        ? [...el.selectedOptions].map((o) => o.label).join(" ")
+        : (el.value ?? "");
     if (!text.trim()) return;
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return;

@@ -26,6 +26,7 @@
   const overlayCtx = overlayCanvas.getContext("2d");
   const debugToggle = document.getElementById("debug-toggle");
   const debugLegend = document.getElementById("debug-legend");
+  const btnCopyDecisions = document.getElementById("copy-decisions");
   const btnCopyImage = document.getElementById("copy-image");
   const btnCopyPrompt = document.getElementById("copy-prompt");
   const btnOpenGemini = document.getElementById("open-gemini");
@@ -61,6 +62,9 @@
   // kept: 非マスクトークン {x, y, w, h, reason, text}。デバッグオーバーレイ専用で、
   // #canvas の描画（≒コピーされる画像）には一切関与しない
   let allKept = [];
+  // decisions: ブロックごとの判定ログ（「判定ログをコピー」用）。実ページでの
+  // 探索テスト時に、DevTools を開かずに塗りすぎ/塗り漏れの原因を分析できるようにする
+  const allDecisions = [];
 
   function render() {
     ctx.drawImage(image, 0, 0);
@@ -81,19 +85,25 @@
   const reasonColor = (reason) => `hsl(${reasonColorHue(reason)}, 70%, 55%)`;
 
   function renderLegend() {
-    const reasons = new Set([...masks.map((m) => m.reason), ...allKept.map((k) => k.reason)]);
-    debugLegend.replaceChildren(...[...reasons].sort().map((reason) => {
+    // reason 別の件数付き凡例（塗:/残: を分けて数える）。実ページでの探索テストで
+    // 「何が過剰マスクの主因か」を一目で掴めるようにする
+    const counts = new Map();
+    const bump = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
+    for (const m of masks) bump(m.reason);
+    for (const k of allKept) bump(k.reason);
+    debugLegend.replaceChildren(...[...counts.keys()].sort().map((reason) => {
       const item = document.createElement("span");
       item.className = "legend-item";
       const swatch = document.createElement("i");
       swatch.style.background = reasonColor(reason);
-      item.append(swatch, document.createTextNode(reason));
+      item.append(swatch, document.createTextNode(`${reason} (${counts.get(reason)})`));
       return item;
     }));
   }
 
   function renderDebugOverlay() {
     overlayCanvas.classList.toggle("visible", debugToggle.checked);
+    btnCopyDecisions.hidden = !debugToggle.checked;
     overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
     if (!debugToggle.checked) return;
     overlayCtx.lineWidth = 2;
@@ -156,6 +166,7 @@
   const applyDecided = ({ masks: newMasks, kept, decisions }) => {
     masks.push(...newMasks);
     allKept.push(...kept);
+    allDecisions.push(decisions);
     // 塗りすぎ・塗り漏れ調査用。確認画面の DevTools コンソールで確認できる
     console.debug("[mask2gemini]", decisions.join(" | "));
   };
@@ -376,6 +387,23 @@
 
   btnOpenGemini.addEventListener("click", () => {
     chrome.tabs.create({ url: "https://gemini.google.com/" });
+  });
+
+  // デバッグ用: 判定結果一式を JSON でコピー（実ページでの探索テストの分析用）。
+  // マスク前のテキストを含むため、貼り付け先は手元のエディタ等に留めること
+  btnCopyDecisions.addEventListener("click", async () => {
+    const summary = {};
+    for (const m of masks) summary[`塗:${m.reason}`] = (summary[`塗:${m.reason}`] ?? 0) + 1;
+    for (const k of allKept) summary[`残:${k.reason}`] = (summary[`残:${k.reason}`] ?? 0) + 1;
+    const payload = {
+      route,
+      summary,
+      masks: masks.map(({ text, reason, source }) => ({ text, reason, source })),
+      kept: allKept.map(({ text, reason }) => ({ text, reason })),
+      decisions: allDecisions,
+    };
+    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    setStatus("判定ログ（JSON）をコピーしました。※マスク前のテキストを含みます");
   });
 })().catch((e) => {
   document.getElementById("status").textContent = `エラー: ${e?.message ?? e}`;
