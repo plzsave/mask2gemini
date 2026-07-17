@@ -154,8 +154,10 @@
       const linePatternReason = linePatternMasked.get(i);
       // 数字+単位の隣接指標は digit / digit-run より先に「残す」を確定する
       // （Issue #7）。ただし DOM データ位置（td・入力値。確定事項11）は構造上
-      // データなので救済せず、email 一致（@ 直後の数字列等）も安全側で塗る
-      if (unitMetricKept.has(i) && unit.semantic !== "data" && linePatternReason !== "email") {
+      // データなので救済せず、email / email-frag 一致（@ 直後の数字列等）も
+      // 安全側で塗る
+      if (unitMetricKept.has(i) && unit.semantic !== "data"
+        && !/^email/.test(linePatternReason ?? "")) {
         return decide("残:unit-metric", "unit-metric");
       }
       const { mask, reason } = linePatternReason
