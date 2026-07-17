@@ -181,9 +181,11 @@
 
   let route = "OCR";
   // ワイヤーフレーム出力用（DOM 経路のみで設定される）: 画像 px → CSS px の
-  // 除数と、dom-extractor の装飾ボックス（CSS px のまま渡す）
+  // 除数と、dom-extractor の装飾ボックス・アイコン領域（CSS px のまま渡す）
   let wireframeScale = 1;
+  let wireframeScaleY = 1;
   let wireframeDecor = [];
+  let wireframeIcons = [];
   if (domExtract?.viewport?.w > 0 && domExtract?.viewport?.h > 0) {
     // dom-extractor.js の座標は CSS px。画像 px への係数は「画像サイズ ÷ viewport
     // サイズ」で出す（devicePixelRatio・ページズームをまとめて吸収する）
@@ -229,7 +231,9 @@
         applyDecided(decided);
       }
       wireframeScale = sx;
+      wireframeScaleY = sy;
       wireframeDecor = domExtract.decor ?? [];
+      wireframeIcons = domExtract.icons ?? [];
     }
   }
 
@@ -425,12 +429,32 @@
     chrome.tabs.create({ url: "https://gemini.google.com/" });
   });
 
+  // アイコン領域（Issue #23）をマスク済みキャンバスから切り抜く。切り抜き元は
+  // 「① 画像をコピー」で出力されるのと同一のマスク適用後ピクセルなので、
+  // ここから漏えい面は広がらない（opaque マスクされた領域は黒塗りのまま写る）
+  function cropIconsFromMaskedCanvas() {
+    return wireframeIcons.map((ic) => {
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(ic.w * wireframeScale));
+      c.height = Math.max(1, Math.round(ic.h * wireframeScaleY));
+      c.getContext("2d").drawImage(
+        canvas,
+        ic.x * wireframeScale, ic.y * wireframeScaleY,
+        ic.w * wireframeScale, ic.h * wireframeScaleY,
+        0, 0, c.width, c.height,
+      );
+      return { ...ic, dataURL: c.toDataURL("image/png") };
+    });
+  }
+
   // ④ ワイヤーフレーム保存（確定事項12）。確認画面の確定状態（手動編集反映後）を
   // .excalidraw へ変換してローカル保存する。マスクした文字列はファイルに含まれない
   btnSaveWireframe.addEventListener("click", () => {
+    render(); // 切り抜きの前に、ドラッグプレビュー等を除いた確定状態を描画する
     const file = globalThis.Mask2GeminiWireframeExporter.buildWireframe({
       masks, kept: allKept, revealed: revealedMasks,
-      decor: wireframeDecor, scale: wireframeScale,
+      decor: wireframeDecor, icons: cropIconsFromMaskedCanvas(),
+      scale: wireframeScale,
     });
     const blob = new Blob([JSON.stringify(file, null, 1)], { type: "application/json" });
     const a = document.createElement("a");

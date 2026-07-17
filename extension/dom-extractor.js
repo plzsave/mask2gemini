@@ -17,6 +17,11 @@
 //                                             // （棒グラフのバー・カード・表の罫線等）。
 //                                             // ワイヤーフレーム出力（Issue #20）専用の
 //                                             // 収集で、マスク判定には一切使わない
+//     icons: [{ x, y, w, h, kind }],          // アイコン領域（Issue #23）。丸塗り閾値未満の
+//                                             // img/svg 等・background-image の小要素・
+//                                             // アイコンフォント（private-use 文字）。
+//                                             // ワイヤーフレーム出力がマスク済み画像から
+//                                             // 切り抜いて埋め込む。マスク判定には使わない
 //   }
 (() => {
   "use strict";
@@ -47,6 +52,7 @@
   const lines = [];
   const opaque = [];
   const decor = [];
+  const icons = [];
 
   // 装飾ボックス収集（Issue #20）のパラメータ。
   // これ未満 (CSS px) の要素は装飾として拾わない（hr やアイコン枠などの細片は
@@ -56,6 +62,17 @@
   const DECOR_MAX_AREA_RATIO = 0.8;
   // 要素数が異常に多いページでの出力肥大防止
   const DECOR_LIMIT = 600;
+
+  // アイコン領域収集（Issue #23）のパラメータ。
+  // 下限未満はトラッキングピクセル等のノイズ、上限超は「アイコン」ではなく
+  // 画像・パネルとみなす（img 等は OPAQUE_MIN_PX 以上なら丸塗り経路が扱う）
+  const ICON_MIN_PX = 8;
+  const ICON_MAX_PX = 64;
+  const ICON_LIMIT = 200;
+  // アイコンフォントが使う private-use 文字（Material Icons 等のコードポイント指定型。
+  // リガチャ型（"menu" 等の英単語で描画）はテキストと区別できないため対象外）
+  const PUA_RUN = /^[\uE000-\uF8FF\s]+$/;
+  const HAS_PUA = /[\uE000-\uF8FF]/;
 
   // shadow 境界をまたいで親要素を辿る
   const parentOf = (n) => {
@@ -90,6 +107,16 @@
 
   const outsideViewport = ({ x0, y0, x1, y1 }) => x1 < 0 || y1 < 0 || x0 > vw || y0 > vh;
 
+  // アイコン領域の収集（Issue #23）。bbox のみを記録し、実体はワイヤーフレーム
+  // 保存時に review.js がマスク済みキャンバスから切り抜く（確定事項12 を参照）
+  const pushIcon = (bbox, kind) => {
+    if (icons.length >= ICON_LIMIT) return;
+    const w = bbox.x1 - bbox.x0, h = bbox.y1 - bbox.y0;
+    if (w < ICON_MIN_PX || h < ICON_MIN_PX || w > ICON_MAX_PX || h > ICON_MAX_PX) return;
+    if (outsideViewport(bbox)) return;
+    icons.push({ x: bbox.x0, y: bbox.y0, w, h, kind });
+  };
+
   const pushLine = (blockId, semantic, chars) => {
     if (!chars.some((c) => c.ch.trim())) return; // 空白だけの行は捨てる
     const bbox = {
@@ -98,6 +125,11 @@
       x1: Math.max(...chars.map((c) => c.bbox.x1)),
       y1: Math.max(...chars.map((c) => c.bbox.y1)),
     };
+    // アイコンフォントのグリフ（private-use 文字だけの行）はテキストではなく
+    // アイコン領域として扱う（Issue #23）。従来は未知語としてハッチ矩形に
+    // なっていた。PII を含み得ない文字域なので lines から外しても recall は落ちない
+    const text = chars.map((c) => c.ch).join("");
+    if (PUA_RUN.test(text) && HAS_PUA.test(text)) return pushIcon(bbox, "glyph");
     lines.push({
       blockId, semantic,
       words: [{
@@ -178,11 +210,13 @@
 
   const collectOpaque = (el, offset, kind) => {
     const r = el.getBoundingClientRect();
-    if (r.width < OPAQUE_MIN_PX || r.height < OPAQUE_MIN_PX) return;
     const bbox = {
       x0: r.left + offset.x, y0: r.top + offset.y,
       x1: r.right + offset.x, y1: r.bottom + offset.y,
     };
+    // 丸塗り閾値未満は装飾アイコン扱い（丸塗りしない）。ワイヤーフレーム出力
+    // 向けにアイコン領域としてだけ記録する（Issue #23）
+    if (r.width < OPAQUE_MIN_PX || r.height < OPAQUE_MIN_PX) return pushIcon(bbox, kind);
     if (outsideViewport(bbox)) return;
     opaque.push({ x: bbox.x0, y: bbox.y0, w: bbox.x1 - bbox.x0, h: bbox.y1 - bbox.y0, kind });
   };
@@ -197,6 +231,15 @@
   const collectDecor = (el, offset) => {
     if (decor.length >= DECOR_LIMIT) return;
     const s = getComputedStyle(el);
+    // background-image の小要素（CSS スプライトアイコン等）はアイコン領域として
+    // 記録する（Issue #23）。装飾ボックスとしての収集（下）とは独立に判定する
+    if (s.backgroundImage !== "none") {
+      const r = el.getBoundingClientRect();
+      pushIcon({
+        x0: r.left + offset.x, y0: r.top + offset.y,
+        x1: r.right + offset.x, y1: r.bottom + offset.y,
+      }, "bg-image");
+    }
     const bg = hasVisibleColor(s.backgroundColor);
     const border = parseFloat(s.borderTopWidth) > 0 && s.borderTopStyle !== "none"
       && hasVisibleColor(s.borderTopColor);
@@ -271,5 +314,5 @@
 
   visit(document.documentElement, { x: 0, y: 0 });
 
-  return { viewport: { w: vw, h: vh }, lines, opaque, decor };
+  return { viewport: { w: vw, h: vh }, lines, opaque, decor, icons };
 })();

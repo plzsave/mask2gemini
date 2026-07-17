@@ -7,6 +7,17 @@
 // - 決定的変換とする（乱数 seed・タイムスタンプを含めない。同入力→同出力）
 // - fontFamily 等、上流仕様を確認していないプロパティは書かない。
 //   Excalidraw 側の読み込み（restore()）が欠損プロパティをデフォルト補完する
+//
+// customData（意味のメタデータ層）:
+// 抽出由来の全要素に customData.m2g を刻む（Excalidraw 公式サポートの
+// 任意メタデータ。レンダリング・編集に影響せず保存される）。cc-sdd 等で
+// LLM が JSON を読む際に「何の枠か」を機械可読にするため。
+// - role: "masked"（+ reason=判定種別。文字列そのものではないので漏えいなし）
+//         / "text"（残存 UI テキスト） / "revealed"（確認画面で解除された語）
+//         / "decor"（装飾） / "icon"（+ kind）
+// - customData が**無い**要素 = エンジニアが Excalidraw で後から追加した提案部分、
+//   という読み分けを README に定めている（Excalidraw の複製操作は customData ごと
+//   コピーするため、既存のデータ枠を複製して増やす編集なら意味も追従する）
 (() => {
   "use strict";
 
@@ -68,10 +79,14 @@
    * @param {object[]} [input.revealed] 確認画面で解除された自動マスク（画像 px・text 付き）。
    *   ユーザーが「残す」と確定した扱いでテキストとして出力する
    * @param {object[]} [input.decor] dom-extractor の装飾ボックス（CSS px）
+   * @param {object[]} [input.icons] アイコン領域（Issue #23）。CSS px の bbox に加え、
+   *   review.js がマスク済みキャンバスから切り抜いた dataURL（image/png）を持つ。
+   *   切り抜き元は「① 画像をコピー」と同一のマスク適用後ピクセルなので、
+   *   ここから漏えい面は広がらない（確定事項12 の派生）
    * @param {number} [input.scale]   画像 px → CSS px の除数（既定 1）
    * @returns {object} .excalidraw ファイル内容
    */
-  function buildWireframe({ masks, kept, revealed = [], decor = [], scale = 1 }) {
+  function buildWireframe({ masks, kept, revealed = [], decor = [], icons = [], scale = 1 }) {
     let n = 0;
     const nextId = (prefix) => `m2g-${prefix}-${(n++).toString(36).padStart(4, "0")}`;
     const groupIds = (blockId) => (blockId === undefined ? [] : [`block-${blockId}`]);
@@ -86,12 +101,37 @@
         backgroundColor: d.bg ? d.color : "transparent",
         strokeColor: d.border ? d.color : "transparent",
         strokeWidth: 1, roughness: 1, groupIds: [],
+        customData: { m2g: { role: "decor" } },
+      });
+    }
+
+    // 装飾の上・テキストの下: アイコン（マスク済みキャンバスからの切り抜き）。
+    // files の created/lastRetrieved は決定性のため固定値 0 にする（確定事項12）
+    const files = {};
+    for (const ic of icons) {
+      if (!ic.dataURL) continue; // 切り抜きに失敗した領域は出力しない
+      const fileId = nextId("f");
+      files[fileId] = {
+        mimeType: "image/png", id: fileId, dataURL: ic.dataURL,
+        created: 0, lastRetrieved: 0,
+      };
+      elements.push({
+        id: nextId("i"), type: "image",
+        x: round(ic.x), y: round(ic.y), width: round(ic.w), height: round(ic.h),
+        fileId, status: "saved", scale: [1, 1],
+        strokeColor: "transparent", groupIds: [],
+        customData: { m2g: { role: "icon", kind: ic.kind } },
       });
     }
 
     // テキスト（残存 + 解除済みマスク）。解除済みはマージ対象にしない
     // （マスク矩形単位ですでにまとまっているため）
-    for (const t of [...mergeTextRuns(kept), ...revealed.filter((m) => m.text)]) {
+    const textItems = [
+      ...mergeTextRuns(kept).map((t) => ({ ...t, m2g: { role: "text" } })),
+      ...revealed.filter((m) => m.text)
+        .map((m) => ({ ...m, m2g: { role: "revealed", reason: m.reason } })),
+    ];
+    for (const t of textItems) {
       const x = t.x / scale, y = t.y / scale, w = t.w / scale, h = t.h / scale;
       elements.push({
         id: nextId("t"), type: "text",
@@ -100,6 +140,7 @@
         fontSize: Math.max(MIN_FONT_SIZE, Math.round(h / LINE_HEIGHT)),
         textAlign: "left", verticalAlign: "top",
         strokeColor: "#1e1e1e", groupIds: groupIds(t.blockId),
+        customData: { m2g: t.m2g },
       });
     }
 
@@ -111,6 +152,9 @@
         x: round(m.x / scale), y: round(m.y / scale),
         width: round(m.w / scale), height: round(m.h / scale),
         ...fill, strokeWidth: 1, roughness: 1, groupIds: groupIds(m.blockId),
+        // reason は判定種別（digit-run / proper-noun / dom-data 等）であって
+        // マスクした文字列ではない。「何のダミーを入れる枠か」を LLM に伝える
+        customData: { m2g: { role: "masked", reason: m.reason ?? "manual" } },
       });
     }
 
@@ -120,7 +164,7 @@
       source: "mask2gemini",
       elements,
       appState: { viewBackgroundColor: "#ffffff" },
-      files: {},
+      files,
     };
   }
 

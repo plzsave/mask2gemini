@@ -333,6 +333,55 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     const rects = file.elements.filter((e) => e.type === "rectangle");
     expect(rects.some((r) => r.fillStyle === "hachure")).toBe(true);
     expect(rects.some((r) => r.backgroundColor === "rgb(43, 74, 111)")).toBe(true);
+    // customData: 抽出由来の全要素に意味のメタデータが刻まれている
+    // （customData の無い要素 = 後から人間が追加したもの、という読み分けの前提）
+    expect(file.elements.every((e) => e.customData?.m2g?.role)).toBe(true);
+    // マスク矩形は「何の枠だったか」の判定種別を持つ（文字列そのものは持たない）
+    const maskedRoles = file.elements.filter((e) => e.customData.m2g.role === "masked");
+    expect(maskedRoles.length).toBeGreaterThan(0);
+    expect(maskedRoles.every((e) => typeof e.customData.m2g.reason === "string")).toBe(true);
+  });
+
+  test("ワイヤーフレーム出力（Issue #23）: アイコンがマスク済み画像の切り抜きとして埋め込まれる", async ({ context, extensionId }) => {
+    let [sw] = context.serviceWorkers();
+    if (!sw) sw = await context.waitForEvent("serviceworker");
+    await sw.evaluate(() => chrome.storage.local.set({ wireframeExportEnabled: true }));
+
+    const { checks, domExtract, reviewPage } = await captureAndReview(
+      context, extensionId, "fixtures/icons.html", { domPath: true });
+    assertChecks(checks, "fixtures/icons.html (DOM)");
+
+    // dom-extractor がアイコン領域を収集していること
+    // （16px svg・16px img・bg-image 20px・PUA グリフ = 4 種）
+    expect(domExtract.icons.length).toBe(4);
+    // PUA グリフはテキスト行から除外される（ハッチ矩形ではなくアイコンになる）
+    expect(JSON.stringify(domExtract.lines)).not.toContain("\uE0A2");
+    // 48px の img はアイコンではなく従来どおり丸塗り対象
+    expect(domExtract.opaque.some((o) => o.kind === "img" && o.w >= 24)).toBe(true);
+
+    const [download] = await Promise.all([
+      reviewPage.waitForEvent("download"),
+      reviewPage.locator("#save-wireframe").click(),
+    ]);
+    const file = JSON.parse(fs.readFileSync(await download.path(), "utf8"));
+
+    // アイコンは image 要素 + files（マスク済みキャンバスからの切り抜き）
+    const images = file.elements.filter((e) => e.type === "image");
+    expect(images.length).toBe(domExtract.icons.length);
+    for (const img of images) {
+      const entry = file.files[img.fileId];
+      expect(entry).toBeTruthy();
+      expect(entry.dataURL.startsWith("data:image/png;base64,")).toBe(true);
+      expect(entry.dataURL.length).toBeGreaterThan(100); // 空クロップでないこと
+      expect(entry.created).toBe(0); // 決定性（確定事項12）
+      expect(img.width).toBeLessThanOrEqual(64); // 丸塗り対象の大きい img は埋め込まれない
+    }
+    // 大きい img は cross-hatch 矩形のまま
+    expect(file.elements.some((e) => e.fillStyle === "cross-hatch")).toBe(true);
+    // マスク文字列・PUA 文字はファイルに含まれない
+    const json = JSON.stringify(file);
+    expect(json).not.toContain("山田太郎");
+    expect(json).not.toContain("\uE0A2");
   });
 
   test("fixtures/opaque-regions.html（DOM経路）: 読めない領域の丸塗りと要素種別判定", async ({ context, extensionId }) => {

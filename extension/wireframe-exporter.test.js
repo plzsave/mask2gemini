@@ -133,6 +133,86 @@ test("buildWireframe: blockId が groupIds に反映される", () => {
   for (const e of file.elements) assert.deepEqual(e.groupIds, ["block-3"]);
 });
 
+// ---- customData（意味のメタデータ層。cc-sdd 等で LLM が JSON を読む用） ----
+
+test("customData: 抽出由来の全要素に m2g メタデータが刻まれる", () => {
+  const file = buildWireframe({
+    masks: [{ x: 0, y: 0, w: 60, h: 20, reason: "digit-run", text: "090-1234" }],
+    kept: [keptUnit("担当", 100)],
+    revealed: [{ x: 0, y: 40, w: 60, h: 20, reason: "proper-noun", text: "株式会社ABC", source: "auto" }],
+    decor: [{ x: 0, y: 0, w: 10, h: 10, bg: true, border: false, color: "rgb(1,2,3)" }],
+  });
+  const roles = file.elements.map((e) => e.customData.m2g.role).sort();
+  assert.deepEqual(roles, ["decor", "masked", "revealed", "text"]);
+  const masked = file.elements.find((e) => e.customData.m2g.role === "masked");
+  assert.equal(masked.customData.m2g.reason, "digit-run", "判定種別が刻まれること");
+  assert.ok(!JSON.stringify(masked).includes("090-1234"), "文字列そのものは含まれないこと");
+  const revealed = file.elements.find((e) => e.customData.m2g.role === "revealed");
+  assert.equal(revealed.customData.m2g.reason, "proper-noun");
+});
+
+test("customData: 手動マスク（reason 無し）は reason=manual になる", () => {
+  const file = buildWireframe({
+    masks: [{ x: 0, y: 0, w: 40, h: 20, source: "manual" }],
+    kept: [],
+  });
+  assert.deepEqual(file.elements[0].customData.m2g, { role: "masked", reason: "manual" });
+});
+
+// ---- Issue #23: アイコンの切り抜き埋め込み ----
+
+const icon = (overrides = {}) => ({
+  x: 10, y: 20, w: 16, h: 16, kind: "svg",
+  dataURL: "data:image/png;base64,AAAA", ...overrides,
+});
+
+test("buildWireframe: アイコンは image 要素 + files として埋め込まれる", () => {
+  const file = buildWireframe({ masks: [], kept: [], icons: [icon()] });
+  const img = file.elements.find((e) => e.type === "image");
+  assert.ok(img);
+  assert.deepEqual([img.x, img.y, img.width, img.height], [10, 20, 16, 16]);
+  assert.equal(img.status, "saved");
+  assert.deepEqual(img.scale, [1, 1]);
+  assert.deepEqual(img.customData.m2g, { role: "icon", kind: "svg" });
+  const entry = file.files[img.fileId];
+  assert.ok(entry, "fileId が files のキーとして解決できること");
+  assert.equal(entry.id, img.fileId);
+  assert.equal(entry.mimeType, "image/png");
+  assert.equal(entry.dataURL, "data:image/png;base64,AAAA");
+});
+
+test("buildWireframe: files の created/lastRetrieved は固定値 0（決定性）", () => {
+  const file = buildWireframe({ masks: [], kept: [], icons: [icon()] });
+  const entry = Object.values(file.files)[0];
+  assert.equal(entry.created, 0);
+  assert.equal(entry.lastRetrieved, 0);
+  const again = buildWireframe({ masks: [], kept: [], icons: [icon()] });
+  assert.equal(JSON.stringify(file), JSON.stringify(again));
+});
+
+test("buildWireframe: アイコン座標は CSS px のまま（scale で割らない）", () => {
+  const file = buildWireframe({ masks: [], kept: [], icons: [icon()], scale: 2 });
+  const img = file.elements.find((e) => e.type === "image");
+  assert.deepEqual([img.x, img.y], [10, 20]);
+});
+
+test("buildWireframe: dataURL の無いアイコン（切り抜き失敗）は出力されない", () => {
+  const file = buildWireframe({ masks: [], kept: [], icons: [icon({ dataURL: null })] });
+  assert.equal(file.elements.filter((e) => e.type === "image").length, 0);
+  assert.deepEqual(file.files, {});
+});
+
+test("buildWireframe: アイコンは装飾より前面・テキストより背面に置かれる", () => {
+  const file = buildWireframe({
+    masks: [],
+    kept: [keptUnit("保存", 100)],
+    decor: [{ x: 0, y: 0, w: 50, h: 50, bg: true, border: false, color: "rgb(1,2,3)" }],
+    icons: [icon()],
+  });
+  const order = file.elements.map((e) => e.type + ":" + (e.fillStyle ?? ""));
+  assert.deepEqual(order, ["rectangle:solid", "image:", "text:"]);
+});
+
 test("mergeTextRuns: 同一行・同一ブロックの近接テキストは 1 要素にマージされる", () => {
   // 「運用」「ダッシュボード」のようなトークン分割を 1 テキストにまとめる
   const merged = mergeTextRuns([
