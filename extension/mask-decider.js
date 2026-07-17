@@ -64,6 +64,7 @@
    * @param {(text: string) => {mask: boolean, reason: string}} deps.judge
    * @param {(token: object) => {mask: boolean, reason: string}} deps.judgeToken
    * @param {(units: object[]) => Map<number,string>} deps.findLinePatternMaskIndices
+   * @param {(units: object[]) => Set<number>} [deps.findUnitMetricIndices]
    * @param {(units: object[], phrases: string[], opts?: object) => Set<number>} deps.findProtectedWordIndices
    * @param {string[]} deps.userTerms
    * @param {string[]} deps.labelTerms
@@ -75,7 +76,7 @@
   function decideParagraphMasks(units, deps) {
     const {
       judge, judgeToken, findLinePatternMaskIndices, findKanjiNameRunIndices,
-      findProtectedWordIndices,
+      findUnitMetricIndices, findProtectedWordIndices,
       userTerms, labelTerms, noiseConfidence, ocrScale, maskPadding,
     } = deps;
 
@@ -99,6 +100,11 @@
     // NOISE_CONFIDENCE の保護がすべて勝つ（下のループ内の適用位置を参照）
     const nameRunMasked = findKanjiNameRunIndices
       ? findKanjiNameRunIndices(units) : new Map();
+    // 数字+単位の隣接指標（Issue #7: 99.95% / 182ms / +12件 等）。digit /
+    // digit-run に対する唯一の「残す」側の例外。適用しないケースは下のループ内
+    // 参照（DOM データ位置・email 一致は救済しない）
+    const unitMetricKept = findUnitMetricIndices
+      ? findUnitMetricIndices(units) : new Set();
 
     // マスク矩形（padding込み）・kept矩形（padding無し）共通の座標変換
     const toRect = ({ x0, y0, x1, y1 }, padding) => ({
@@ -146,6 +152,12 @@
       };
       if (userProtected.has(i)) return decide("残:user", "user"); // ユーザー登録は無条件で勝つ
       const linePatternReason = linePatternMasked.get(i);
+      // 数字+単位の隣接指標は digit / digit-run より先に「残す」を確定する
+      // （Issue #7）。ただし DOM データ位置（td・入力値。確定事項11）は構造上
+      // データなので救済せず、email 一致（@ 直後の数字列等）も安全側で塗る
+      if (unitMetricKept.has(i) && unit.semantic !== "data" && linePatternReason !== "email") {
+        return decide("残:unit-metric", "unit-metric");
+      }
       const { mask, reason } = linePatternReason
         ? { mask: true, reason: linePatternReason }
         : unit.token ? judgeToken(unit.token) : judge(unit.text);

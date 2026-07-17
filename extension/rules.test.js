@@ -157,6 +157,105 @@ test("digit-run: 同一行のメールと電話が別 reason で共存する", (
   assert.equal(hits.get(7), "digit-run", "電話番号内の区切り - も塗られること");
 });
 
+// ---- Issue #7: findUnitMetricIndices（数字+単位の隣接指標の救済） ----
+
+const { findUnitMetricIndices } = globalThis.Mask2GeminiRules;
+// bbox 付き unit（同一行）。x0 は使わないので y のみ揃える
+const metricUnit = (text, { y0 = 0, y1 = 10 } = {}) => ({
+  text, bbox: { x0: 0, y0, x1: 10, y1 },
+});
+
+test("unit-metric: 単位が直接隣接した指標値は全トークンが救済対象になる", () => {
+  // kuromoji のトークン分割（99 / . / 95 / %）を模した断片でも全体が拾える
+  const cases = [
+    ["99", ".", "95", "%"],
+    ["182", "ms"],
+    ["+", "12", "件"],
+    ["±", "0", "%"],
+    ["-", "8", "ms"],
+    ["128", ",", "450", "人"],
+    ["3", "回"],
+    ["30", "分"],
+    ["45", "秒"],
+    ["99.95%"], // OCR 単語のまま分割されないケース
+  ];
+  for (const texts of cases) {
+    const units = texts.map((t) => metricUnit(t));
+    const hits = findUnitMetricIndices(units);
+    assert.equal(hits.size, units.length, `${texts.join("")} は全 unit が救済されること`);
+  }
+});
+
+test("unit-metric: 単位が付かない数字・PII 形式の数字は救済しない", () => {
+  const cases = [
+    ["37"], // 単位なし単独数字（Issue #7 で諦めたケース。digit のまま塗る）
+    ["128", ",", "450"], // 単位なしのカンマ区切り
+    ["090", "-", "1234", "-", "5678"], // 電話番号
+    ["〒", "123", "-", "4567"], // 郵便番号
+    ["¥", "120", ",", "000"], // 金額（¥ は単位リスト外）
+    ["120", ",", "000", "円"], // 金額（円 は意図的に単位リスト外）
+    ["2024", "年"], // 日付（年月日 は意図的に単位リスト外）
+    ["24", "h"], // h は単位リスト外
+    ["1234", "件"], // 4桁以上のカンマ無し生数字は ID の可能性があるので対象外
+  ];
+  for (const texts of cases) {
+    const units = texts.map((t) => metricUnit(t));
+    assert.equal(findUnitMetricIndices(units).size, 0,
+      `${texts.join("")} は救済されないこと`);
+  }
+});
+
+test("unit-metric: 直前に数字・連結記号・@・: が癒着した数値は救済しない", () => {
+  const cases = [
+    ["090-1234-5678", "分"], // 電話番号の末尾に単位が続く形
+    ["14", ":", "30", "分"], // 時刻の断片
+    ["abc@99", ".", "95", "%"], // メールドメイン中の数字列
+    ["128,450", "+", "4.2", "%"], // ブロック結合で前の行の数値と癒着した形
+  ];
+  for (const texts of cases) {
+    const units = texts.map((t) => metricUnit(t));
+    assert.equal(findUnitMetricIndices(units).size, 0,
+      `${texts.join("")} は救済されないこと`);
+  }
+});
+
+test("unit-metric: 単位の直後に語が続く場合（複合語の一部）は救済しない", () => {
+  // 「5件数」の「件」は単位ではなく「件数」の一部
+  const units = [metricUnit("5"), metricUnit("件数")];
+  assert.equal(findUnitMetricIndices(units).size, 0);
+});
+
+test("unit-metric: 数字と単位の間に空白がある場合は救済しない（隣接のみ）", () => {
+  // DOM 経路は空白が unit として残るため「182 ms」は隣接扱いにならない
+  const units = [metricUnit("182"), metricUnit(" "), metricUnit("ms")];
+  assert.equal(findUnitMetricIndices(units).size, 0);
+});
+
+test("unit-metric: 別の視覚行の数値とは癒着しない（bbox の縦重なりで行を分割）", () => {
+  // KPI カード: 1行目「128,450」・2行目「+4.2%」。ブロック結合で文字列上は
+  // 「128,450+4.2%」に癒着するが、行が違うので +4.2% は独立に救済される
+  const units = [
+    metricUnit("128,450", { y0: 0, y1: 10 }),
+    metricUnit("+4.2%", { y0: 20, y1: 30 }),
+  ];
+  const hits = findUnitMetricIndices(units);
+  assert.equal(hits.size, 1);
+  assert.ok(hits.has(1), "+4.2% だけが救済されること");
+  assert.ok(!hits.has(0), "単位なしの 128,450 は塗られたままであること");
+});
+
+test("unit-metric: 一致範囲に部分的にしか入らない unit は救済しない", () => {
+  // 「37%が」のように単位の後ろへ語が続くトークンが同じ unit に含まれる場合、
+  // その unit 全体が対象外になる
+  const units = [metricUnit("37%が")];
+  assert.equal(findUnitMetricIndices(units).size, 0);
+});
+
+test("unit-metric: 全角の ％・全角数字も救済する", () => {
+  const units = [metricUnit("９９"), metricUnit("％")];
+  assert.equal(findUnitMetricIndices(units).size, 2);
+});
+
 // ---- findKanjiNameRunIndices（Issue #10 事象1: 漢字名ラン検出） ----
 // kuromoji の実出力（本ファイル冒頭のテストと同様、実測値ベース）を模した
 // 疑似トークンで検証する
