@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>div 疑似テーブル（E2E フィクスチャ）</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f5f6f8; color: #222; font-size: 13px; }
+    main { padding: 24px; display: flex; flex-direction: column; gap: 24px; }
+    h2 { font-size: 14px; margin: 0 0 8px; }
+    .grid { display: grid; grid-template-columns: 160px 140px 160px 220px; background: #fff; border: 1px solid #d0d5da; }
+    .grid > div > div { padding: 8px 12px; border-bottom: 1px solid #e3e6ea; }
+    .grid > div { display: contents; }
+    .ghead div { background: #e8ecf1; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <!-- Issue #16 論点2: div + CSS grid で組まれた疑似テーブル。td/th を持たないため
+       role ベースの要素種別判定（確定事項11）の対象になる。すべて架空の値 -->
+  <main>
+    <section>
+      <h2 data-check="keep">契約一覧（role 付き疑似テーブル）</h2>
+      <!-- ARIA role あり: 行に role="row"、ヘッダセルに role="columnheader"。
+           セル自体には cell role が無い（行にだけ role を付ける雑な実装の再現） -->
+      <div class="grid" role="table" aria-label="契約一覧">
+        <div class="ghead" role="row">
+          <div role="columnheader" data-check="keep">顧客名</div>
+          <div role="columnheader" data-check="keep">対応状況</div>
+          <div role="columnheader" data-check="keep">担当</div>
+          <div role="columnheader" data-check="keep">メモ</div>
+        </div>
+        <div role="row">
+          <div data-check="mask">高橋物産株式会社</div>
+          <!-- 一般語のデータ値。テキスト面判定では「残す」になるが、
+               role=row 配下は dom-data として塗られるべき（確定事項11 の td と同等） -->
+          <div data-check="mask">対応中</div>
+          <div data-check="mask">佐々木蓮</div>
+          <div data-check="mask">次回更新の確認</div>
+        </div>
+        <div role="row">
+          <div data-check="mask">合同会社みどり企画</div>
+          <div data-check="mask">完了</div>
+          <div data-check="mask">王偉</div>
+          <div data-check="mask">検索から流入</div>
+        </div>
+      </div>
+    </section>
+    <section>
+      <h2 data-check="keep">担当割当（role 無しの素の div グリッド）</h2>
+      <!-- role が一切無い完全な素の div グリッド（Issue #16 のスコープ外）。
+           構造判定は効かず、テキスト面ルールのみで判定される現状の境界を可視化する:
+           漢字人名は kanji-run（#10）・固有名詞判定で塗られるが、
+           「正常」等の一般語データは残る（これが幾何判定を導入しない限りの限界）。
+           一般語セルには data-check を付けない（現状の限界を期待値として
+           固定しないため。人名セルはテキスト面で塗られるべきなので mask を張る） -->
+      <div class="grid">
+        <div>
+          <div>認証基盤</div>
+          <div>正常</div>
+          <!-- 「さくら」はひらがなの名で kanji-run（#10 は漢字限定）をすり抜ける。
+               別クラスの塗り漏れとして Issue #26 で追跡 -->
+          <div data-check="mask" data-known-issue="26">岡本さくら</div>
+          <div>引き継ぎ済み</div>
+        </div>
+        <div>
+          <div>決済連携</div>
+          <div>警告</div>
+          <div data-check="mask">陳建国</div>
+          <div>来週対応</div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
