@@ -52,6 +52,17 @@
     setMsg(`「${term}」を追加しました`);
   });
 
+  // エンジニア向け: ワイヤーフレーム出力のオプトイン（Issue #20・確定事項12）。
+  // review.js の WIREFRAME_KEY と同じキーを読み書きする
+  const WIREFRAME_KEY = "wireframeExportEnabled";
+  const wireframeToggle = document.getElementById("wireframe-toggle");
+  const { [WIREFRAME_KEY]: wireframeEnabled } = await chrome.storage.local.get(WIREFRAME_KEY);
+  wireframeToggle.checked = Boolean(wireframeEnabled);
+  wireframeToggle.addEventListener("change", async () => {
+    await chrome.storage.local.set({ [WIREFRAME_KEY]: wireframeToggle.checked });
+    setMsg(`ワイヤーフレーム出力を${wireframeToggle.checked ? "有効" : "無効"}にしました（次回の撮影から反映）`);
+  });
+
   document.getElementById("export").addEventListener("click", () => {
     const blob = new Blob(
       [JSON.stringify({ version: 1, terms }, null, 2)],
