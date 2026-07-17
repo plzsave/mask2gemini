@@ -391,6 +391,27 @@ test("kanji-run: 顧客管理（アンカー無しの一般語複合）は従来
   assert.equal(masks.length, 0);
 });
 
+test("kana-name: 岡本さくら はひらがなの名ごと塗られ、保護は kanji-run と同様に勝つ（Issue #26）", () => {
+  const kana = (surface, x0, opts = {}) => ({
+    text: surface, confidence: 90, semantic: opts.semantic ?? null,
+    bbox: { x0, y0: 0, x1: x0 + 10, y1: 10 },
+    token: { surface_form: surface, pos: "名詞", pos_detail_1: opts.d1,
+      pos_detail_2: opts.d2, word_type: "KNOWN" },
+  });
+  const units = () => [
+    kana("岡本", 0, { d1: "固有名詞", d2: "人名" }),
+    kana("さくら", 10, { d1: "一般" }),
+  ];
+  // 岡本は proper-noun、さくらは kana-name で塗られる
+  const { masks, decisions } = decideParagraphMasks(units(), baseDeps());
+  assert.equal(masks.length, 2);
+  assert.ok(decisions[1].includes("塗:kana-name"));
+  // DOM ラベル位置なら塗らない（kanji-run と同じ保護が効く）
+  const labeled = units().map((u) => ({ ...u, semantic: "label" }));
+  const { masks: labelMasks } = decideParagraphMasks(labeled, baseDeps());
+  assert.equal(labelMasks.filter((m) => m.reason === "kana-name").length, 0);
+});
+
 test("kanji-run: findKanjiNameRunIndices が deps に無い場合も動く（後方互換）", () => {
   const units = [unit("検索")];
   const deps = baseDeps();
