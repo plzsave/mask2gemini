@@ -45,7 +45,10 @@ zip ビルドと Release 作成は GitHub Actions（`.github/workflows/release.y
    - subject（1行目）= リリースタイトル（例: `v0.6.1 — 非日本語人名の塗り漏れ修正`）
    - body = ノート本文。体裁は過去リリースに合わせ「変更点 / 既知の課題 /
      インストール」の 3 節・日本語。recall/セキュリティ修正は冒頭で明示する
-   - `git tag -a vX.Y.Z -F <ノートファイル>` → `git push origin vX.Y.Z`
+   - `git tag -a vX.Y.Z --cleanup=verbatim -F <ノートファイル>` → `git push origin vX.Y.Z`
+     （**`--cleanup=verbatim` 必須**: 省略すると git が `#` 始まりの行を
+     コメントとして除去し、Markdown 見出し「## 変更点」等がノートから消える。
+     v99.0.0 検証で実際に発生）
 6. Release ワークフローを `gh run watch` で完走まで確認し、
    `gh release view vX.Y.Z` で zip が添付されたことを確認して報告する。
    失敗したら原因を修正し、タグを切り直す
