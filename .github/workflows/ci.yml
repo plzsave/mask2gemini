@@ -33,6 +33,11 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
 
+      - name: Install Japanese fonts
+        # ubuntu ランナーに CJK フォントが無いと fixture の日本語が正しく描画されず、
+        # OCR 経路の E2E が誤読で不安定になる（ボタン語の過剰マスク・人名の塗り漏れ）
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+
       - name: Install Playwright Chromium
         run: bunx playwright install --with-deps chromium
 
