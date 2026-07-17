@@ -133,6 +133,59 @@ test("buildWireframe: blockId が groupIds に反映される", () => {
   for (const e of file.elements) assert.deepEqual(e.groupIds, ["block-3"]);
 });
 
+// ---- Issue #23: アイコンの切り抜き埋め込み ----
+
+const icon = (overrides = {}) => ({
+  x: 10, y: 20, w: 16, h: 16, kind: "svg",
+  dataURL: "data:image/png;base64,AAAA", ...overrides,
+});
+
+test("buildWireframe: アイコンは image 要素 + files として埋め込まれる", () => {
+  const file = buildWireframe({ masks: [], kept: [], icons: [icon()] });
+  const img = file.elements.find((e) => e.type === "image");
+  assert.ok(img);
+  assert.deepEqual([img.x, img.y, img.width, img.height], [10, 20, 16, 16]);
+  assert.equal(img.status, "saved");
+  assert.deepEqual(img.scale, [1, 1]);
+  const entry = file.files[img.fileId];
+  assert.ok(entry, "fileId が files のキーとして解決できること");
+  assert.equal(entry.id, img.fileId);
+  assert.equal(entry.mimeType, "image/png");
+  assert.equal(entry.dataURL, "data:image/png;base64,AAAA");
+});
+
+test("buildWireframe: files の created/lastRetrieved は固定値 0（決定性）", () => {
+  const file = buildWireframe({ masks: [], kept: [], icons: [icon()] });
+  const entry = Object.values(file.files)[0];
+  assert.equal(entry.created, 0);
+  assert.equal(entry.lastRetrieved, 0);
+  const again = buildWireframe({ masks: [], kept: [], icons: [icon()] });
+  assert.equal(JSON.stringify(file), JSON.stringify(again));
+});
+
+test("buildWireframe: アイコン座標は CSS px のまま（scale で割らない）", () => {
+  const file = buildWireframe({ masks: [], kept: [], icons: [icon()], scale: 2 });
+  const img = file.elements.find((e) => e.type === "image");
+  assert.deepEqual([img.x, img.y], [10, 20]);
+});
+
+test("buildWireframe: dataURL の無いアイコン（切り抜き失敗）は出力されない", () => {
+  const file = buildWireframe({ masks: [], kept: [], icons: [icon({ dataURL: null })] });
+  assert.equal(file.elements.filter((e) => e.type === "image").length, 0);
+  assert.deepEqual(file.files, {});
+});
+
+test("buildWireframe: アイコンは装飾より前面・テキストより背面に置かれる", () => {
+  const file = buildWireframe({
+    masks: [],
+    kept: [keptUnit("保存", 100)],
+    decor: [{ x: 0, y: 0, w: 50, h: 50, bg: true, border: false, color: "rgb(1,2,3)" }],
+    icons: [icon()],
+  });
+  const order = file.elements.map((e) => e.type + ":" + (e.fillStyle ?? ""));
+  assert.deepEqual(order, ["rectangle:solid", "image:", "text:"]);
+});
+
 test("mergeTextRuns: 同一行・同一ブロックの近接テキストは 1 要素にマージされる", () => {
   // 「運用」「ダッシュボード」のようなトークン分割を 1 テキストにまとめる
   const merged = mergeTextRuns([

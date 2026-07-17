@@ -68,10 +68,14 @@
    * @param {object[]} [input.revealed] 確認画面で解除された自動マスク（画像 px・text 付き）。
    *   ユーザーが「残す」と確定した扱いでテキストとして出力する
    * @param {object[]} [input.decor] dom-extractor の装飾ボックス（CSS px）
+   * @param {object[]} [input.icons] アイコン領域（Issue #23）。CSS px の bbox に加え、
+   *   review.js がマスク済みキャンバスから切り抜いた dataURL（image/png）を持つ。
+   *   切り抜き元は「① 画像をコピー」と同一のマスク適用後ピクセルなので、
+   *   ここから漏えい面は広がらない（確定事項12 の派生）
    * @param {number} [input.scale]   画像 px → CSS px の除数（既定 1）
    * @returns {object} .excalidraw ファイル内容
    */
-  function buildWireframe({ masks, kept, revealed = [], decor = [], scale = 1 }) {
+  function buildWireframe({ masks, kept, revealed = [], decor = [], icons = [], scale = 1 }) {
     let n = 0;
     const nextId = (prefix) => `m2g-${prefix}-${(n++).toString(36).padStart(4, "0")}`;
     const groupIds = (blockId) => (blockId === undefined ? [] : [`block-${blockId}`]);
@@ -86,6 +90,24 @@
         backgroundColor: d.bg ? d.color : "transparent",
         strokeColor: d.border ? d.color : "transparent",
         strokeWidth: 1, roughness: 1, groupIds: [],
+      });
+    }
+
+    // 装飾の上・テキストの下: アイコン（マスク済みキャンバスからの切り抜き）。
+    // files の created/lastRetrieved は決定性のため固定値 0 にする（確定事項12）
+    const files = {};
+    for (const ic of icons) {
+      if (!ic.dataURL) continue; // 切り抜きに失敗した領域は出力しない
+      const fileId = nextId("f");
+      files[fileId] = {
+        mimeType: "image/png", id: fileId, dataURL: ic.dataURL,
+        created: 0, lastRetrieved: 0,
+      };
+      elements.push({
+        id: nextId("i"), type: "image",
+        x: round(ic.x), y: round(ic.y), width: round(ic.w), height: round(ic.h),
+        fileId, status: "saved", scale: [1, 1],
+        strokeColor: "transparent", groupIds: [],
       });
     }
 
@@ -120,7 +142,7 @@
       source: "mask2gemini",
       elements,
       appState: { viewBackgroundColor: "#ffffff" },
-      files: {},
+      files,
     };
   }
 
