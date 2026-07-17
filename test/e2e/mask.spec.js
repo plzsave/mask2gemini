@@ -333,6 +333,13 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     const rects = file.elements.filter((e) => e.type === "rectangle");
     expect(rects.some((r) => r.fillStyle === "hachure")).toBe(true);
     expect(rects.some((r) => r.backgroundColor === "rgb(43, 74, 111)")).toBe(true);
+    // customData: 抽出由来の全要素に意味のメタデータが刻まれている
+    // （customData の無い要素 = 後から人間が追加したもの、という読み分けの前提）
+    expect(file.elements.every((e) => e.customData?.m2g?.role)).toBe(true);
+    // マスク矩形は「何の枠だったか」の判定種別を持つ（文字列そのものは持たない）
+    const maskedRoles = file.elements.filter((e) => e.customData.m2g.role === "masked");
+    expect(maskedRoles.length).toBeGreaterThan(0);
+    expect(maskedRoles.every((e) => typeof e.customData.m2g.reason === "string")).toBe(true);
   });
 
   test("ワイヤーフレーム出力（Issue #23）: アイコンがマスク済み画像の切り抜きとして埋め込まれる", async ({ context, extensionId }) => {
