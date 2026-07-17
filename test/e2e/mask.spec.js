@@ -273,6 +273,19 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     expect(JSON.stringify(domExtract)).not.toContain("KAgi-9973-himitsu");
   });
 
+  test("fixtures/dashboard.html（DOM経路）: 数字+単位の隣接指標が過剰マスクされない（Issue #7）", async ({ context, extensionId }) => {
+    // DOM 経路のみで検証する。fixture の td の mask 期待は要素種別判定
+    // （確定事項11: td=データ位置）前提で、OCR 経路には構造情報が無く
+    // 「正常」「警告」等の一般語 td は原理的に残るため、OCR 経路の E2E 対象に
+    // すると常時 red になる。単位隣接判定そのものは両経路共通の
+    // rules.js/mask-decider.js にあり、ユニットテストが両経路相当を覆っている
+    const { checks, statusText } = await captureAndReview(
+      context, extensionId, "fixtures/dashboard.html", { domPath: true });
+    expect(statusText).toContain("ページ構造を解析");
+    expect(checks.length).toBeGreaterThan(0);
+    assertChecks(checks, "fixtures/dashboard.html (DOM)");
+  });
+
   test("fixtures/opaque-regions.html（DOM経路）: 読めない領域の丸塗りと要素種別判定", async ({ context, extensionId }) => {
     const { checks, statusText } = await captureAndReview(
       context, extensionId, "fixtures/opaque-regions.html", { domPath: true });

@@ -51,6 +51,9 @@
     // なりうるため、部分一致ではなく語全体をアローリストに含める）
     "エクスポート", "インポート", "リフレッシュ", "ダッシュボード",
     "csvエクスポート", "csvインポート",
+    // Issue #7: IPADIC が固有名詞扱いする一般的なカタカナ UI 語彙
+    // （「月間アクティブユーザー」等のダッシュボード指標ラベルで頻出）
+    "アクティブ",
   ]);
 
   // 定型 PII（ブロックリスト）。OCR の単語分割で崩れても部分一致で拾えるよう緩めに書く。
@@ -134,6 +137,76 @@
         for (let k = start; k < end && k < owner.length; k++) result.set(owner[k], reason);
         if (m[0].length === 0) re.lastIndex += 1; // ゼロ幅一致時の無限ループ防止
       }
+    }
+    return result;
+  }
+
+  // Issue #7: 数字+単位の隣接判定（ダッシュボード指標の過剰マスク緩和）。
+  // digit / digit-run ルールに対する唯一の「残す」側の例外で、
+  // 「単位らしき文字列が数字に直接くっついている」ケースだけを救済する。
+  //
+  // recall 優先（SPEC.md 確定事項2）を崩さないための限定条件:
+  // - 単位リストは意図的に狭い。円/¥/$（金額）・年/月/日（日付・生年月日）は
+  //   PII 性が高いので含めない。h・単独 s も含めない（"24h" 等は塗られたまま）
+  // - 数字部は「3桁以下 or カンマ桁区切り」+ 小数のみ。電話・郵便・ID のような
+  //   区切り記号（- / 等）を含む形や 4 桁以上の生数字は一致しない
+  // - 直前が数字・digit-run の連結記号・@・: の場合は一致させない
+  //   （ブロック結合で前の数値と文字列上癒着したケース、時刻 "14:30" の断片、
+  //   メールドメイン中の数字列を誤って救済しないため）
+  // - 単位の直後に英数字・かな漢字が続く場合は一致しない（"5件数" の "件" 等、
+  //   複合語の一部を単位と誤認しないため）
+  const UNIT_METRIC_RE = new RegExp(
+    "(?<![\\d.,\\-‐‑–—−ー－()（）．，／/+＋#:：〒@])"
+    + "[+\\-±−＋－]?\\d{1,3}(?:,\\d{3})*(?:\\.\\d+)?"
+    + "(?:%|％|ms|件|人|回|分|秒)"
+    + "(?![\\p{L}\\p{N}])",
+    "gu",
+  );
+
+  /**
+   * 数字+単位が直接隣接した指標値（99.95% / 182ms / +12件 等）に属する unit の
+   * index を検出する。findLinePatternMaskIndices と同じ行結合方式だが、
+   * こちらは「残す」側の例外なので、条件はすべて安全側（狭い側）に倒す:
+   * - ブロック結合された units を bbox の縦重なりで視覚行ごとに区切ってから照合する
+   *   （別の行の数値と癒着した文字列を「隣接」と誤認しない）
+   * - unit の全文字が一致範囲に含まれる場合のみ対象にする（部分一致トークンは
+   *   塗られたまま）
+   * @param {{text: string, bbox: {y0:number,y1:number}}[]} units
+   * @returns {Set<number>} 救済対象の unit index
+   */
+  function findUnitMetricIndices(units) {
+    const result = new Set();
+    // bbox を持たない unit（ユニットテストの簡易 unit 等）は行分割の判定材料に
+    // ならないだけで、同一行として扱う
+    const sameLine = (a, b) =>
+      !a || !b || Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0) > 0;
+    const segments = [];
+    units.forEach((u, i) => {
+      const last = segments[segments.length - 1];
+      if (last && sameLine(units[last[last.length - 1]].bbox, u.bbox)) last.push(i);
+      else segments.push([i]);
+    });
+    for (const seg of segments) {
+      const normTexts = seg.map((i) => normalizeForLineMatch(units[i].text));
+      const joined = normTexts.join("");
+      if (joined.length === 0) continue;
+      const owner = [];
+      normTexts.forEach((t, k) => {
+        for (let c = 0; c < t.length; c++) owner.push(seg[k]);
+      });
+      const covered = new Array(joined.length).fill(false);
+      UNIT_METRIC_RE.lastIndex = 0;
+      let m;
+      while ((m = UNIT_METRIC_RE.exec(joined))) {
+        for (let k = m.index; k < m.index + m[0].length; k++) covered[k] = true;
+        if (m[0].length === 0) UNIT_METRIC_RE.lastIndex += 1;
+      }
+      const fullyCovered = new Map(); // unit index -> 全文字が一致範囲内か
+      covered.forEach((cov, k) => {
+        const i = owner[k];
+        fullyCovered.set(i, (fullyCovered.get(i) ?? true) && cov);
+      });
+      for (const [i, ok] of fullyCovered) if (ok) result.add(i);
     }
     return result;
   }
@@ -270,6 +343,7 @@
 
   globalThis.Mask2GeminiRules = {
     judge, judgeToken, findLinePatternMaskIndices, findKanjiNameRunIndices,
+    findUnitMetricIndices,
     LONG_TEXT_THRESHOLD, UI_LABEL_ALLOWLIST,
   };
 })();
