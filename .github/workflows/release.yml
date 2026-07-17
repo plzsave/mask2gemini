@@ -1,0 +1,84 @@
+# タグ push（v*）でリリースを機械実行する。役割分担は CLAUDE.md のリリース運用
+# ルールを参照: リリース要否の判断・バージョン決定・ノート執筆はローカル（LLM/人間）が
+# 行い、注釈付きタグとして push する。このワークフローはその後の機械部分
+# （クリーン環境でのテスト → zip ビルド → Release 作成・添付）だけを担う。
+# uses: はコミット SHA でピンし、更新は Dependabot に任せる
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # Release 作成に必要
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Fetch tag annotation
+        # actions/checkout はタグを commit に peel して取得することがあり、
+        # そのままでは注釈（リリースノート本文）が読めない既知の問題への対処
+        run: git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+
+      - name: Verify tag matches manifest version
+        # bump コミット忘れ・タグの切り間違いを最初に検出する
+        run: |
+          manifest="v$(jq -r .version extension/manifest.json)"
+          tag="${GITHUB_REF_NAME}"
+          if [ "$manifest" != "$tag" ]; then
+            echo "::error::manifest version ($manifest) がタグ ($tag) と一致しません" >&2
+            exit 1
+          fi
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build extension vendor assets
+        run: bash scripts/copy-vendor.sh
+
+      - name: Unit tests
+        run: bun run test
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+
+      - name: Install Japanese fonts
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+
+      - name: Install Playwright Chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: E2E tests
+        # OCR 経路の輝度アサーションは環境差で揺れるため CI と同じくソフト判定
+        # （ci.yml のコメント参照）。DOM 経路・判定ロジックは厳格
+        env:
+          M2G_SOFT_OCR: "1"
+        run: bun run test:e2e
+
+      - name: Package extension
+        run: bash scripts/package.sh
+
+      - name: Create GitHub release
+        # ノートは注釈付きタグから取る（subject = リリースタイトル、body = ノート本文）。
+        # GITHUB_REF_NAME はタグ名で、v* パターンにマッチしたもののみここへ来る
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="$(git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME")"
+          git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME" > /tmp/notes.md
+          if [ -z "$title" ] || [ ! -s /tmp/notes.md ]; then
+            echo "::error::注釈付きタグにタイトル/ノート本文がありません（CLAUDE.md の手順参照）" >&2
+            exit 1
+          fi
+          zip="dist/mask2gemini-${GITHUB_REF_NAME#v}.zip"
+          test -f "$zip"
+          gh release create "$GITHUB_REF_NAME" "$zip" --title "$title" --notes-file /tmp/notes.md

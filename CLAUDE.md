@@ -31,18 +31,30 @@
 
 ### 手順（機械的に実行する）
 
+zip ビルドと Release 作成は GitHub Actions（`.github/workflows/release.yml`、
+タグ push トリガー）が行う。ローカルの仕事は判断・bump・ノート執筆・タグ作成まで。
+
 1. main を最新化し、**直近でマージされた PR の内容が実際に main に含まれるかを
    `git log` で確認する**（stacked PR では base ブランチ止まりになる事故がある。
    過去に PR #15 で発生）
 2. `extension/manifest.json` の version を更新（挙動説明が変わる場合は description も）
-3. `bun run test` → `bun run test:e2e` を通す（証拠として結果を示す）
+3. `bun run test` → `bun run test:e2e` を通す（証拠として結果を示す。
+   OCR 経路の正はローカルなのでここを省略しない）
 4. `chore: bump version to X.Y.Z` を main にコミットして push
-5. `bash scripts/package.sh` → `dist/mask2gemini-X.Y.Z.zip` を生成し、zip に
-   今回の変更ファイルが入っていることを確認する
-6. `gh release create vX.Y.Z dist/mask2gemini-X.Y.Z.zip` でリリース作成。
-   ノートの体裁は過去リリース（v0.5.0, v0.6.0）に合わせる:
-   「変更点 / 既知の課題 / インストール」の 3 節・日本語。
-   recall/セキュリティ修正が含まれる場合はノート冒頭で明示する
+5. リリースノートを本文にした**注釈付きタグ**を作成して push する:
+   - subject（1行目）= リリースタイトル（例: `v0.6.1 — 非日本語人名の塗り漏れ修正`）
+   - body = ノート本文。体裁は過去リリースに合わせ「変更点 / 既知の課題 /
+     インストール」の 3 節・日本語。recall/セキュリティ修正は冒頭で明示する
+   - `git tag -a vX.Y.Z --cleanup=verbatim -F <ノートファイル>` → `git push origin vX.Y.Z`
+     （**`--cleanup=verbatim` 必須**: 省略すると git が `#` 始まりの行を
+     コメントとして除去し、Markdown 見出し「## 変更点」等がノートから消える。
+     v99.0.0 検証で実際に発生）
+6. Release ワークフローを `gh run watch` で完走まで確認し、
+   `gh release view vX.Y.Z` で zip が添付されたことを確認して報告する。
+   失敗したら原因を修正し、タグを切り直す
+   （`git tag -d vX.Y.Z && git push origin --delete vX.Y.Z` → 再タグ）。
+   ワークフロー側が使えない事情がある場合のみ、旧手順
+   （ローカルで `package.sh` → `gh release create`）にフォールバックしてよい
 
 ### GitHub リポジトリ側の付帯作業
 
