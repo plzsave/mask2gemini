@@ -342,6 +342,17 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     expect(maskedRoles.every((e) => typeof e.customData.m2g.reason === "string")).toBe(true);
   });
 
+  test("fixtures/pseudo-table.html（DOM経路）: role付き div 疑似テーブルのセルがデータとして塗られる（Issue #16）", async ({ context, extensionId }) => {
+    // role="row" 配下のセル（cell role 無し）が td 同等の dom-data 扱いになり、
+    // columnheader は残ること。role 無しの素の div グリッドはテキスト面ルールのみ
+    // （人名は塗られる）という境界も同じ fixture で検証する
+    const { checks, statusText } = await captureAndReview(
+      context, extensionId, "fixtures/pseudo-table.html", { domPath: true });
+    expect(statusText).toContain("ページ構造を解析");
+    expect(checks.length).toBeGreaterThan(0);
+    assertChecks(checks, "fixtures/pseudo-table.html (DOM)");
+  });
+
   test("ワイヤーフレーム出力（Issue #23）: アイコンがマスク済み画像の切り抜きとして埋め込まれる", async ({ context, extensionId }) => {
     let [sw] = context.serviceWorkers();
     if (!sw) sw = await context.waitForEvent("serviceworker");

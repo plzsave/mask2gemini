@@ -44,7 +44,13 @@
   const DATA_TAGS = new Set(["td", "output"]);
   const LABEL_ROLES = new Set(["button", "columnheader", "rowheader", "heading", "tab",
     "navigation", "menu", "menubar", "menuitem"]);
-  const DATA_ROLES = new Set(["cell", "gridcell"]);
+  // row を含める理由（Issue #16 論点2）: div 疑似テーブル（React 系管理画面等）は
+  // セルに cell/gridcell role を付けず行にだけ role="row" を付ける実装が多い。
+  // 祖先探索は要素ごとに LABEL_ROLES を先に見るため、ヘッダ行のセル
+  // （columnheader）は row まで辿る前に label で確定し、誤って data にならない。
+  // role すら無い完全な素の div グリッドは対象外（幾何判定が要るため。
+  // テキスト面ルール（kanji-run 等）だけで判定される）
+  const DATA_ROLES = new Set(["cell", "gridcell", "row"]);
   // 中身をテキストとして読めない描画要素（確定事項10）
   const OPAQUE_TAGS = new Set(["img", "canvas", "svg", "video", "picture"]);
   const SKIP_TAGS = new Set(["script", "style", "noscript", "template", "head"]);
@@ -278,7 +284,13 @@
     const el = node;
     const tag = el.localName;
     if (SKIP_TAGS.has(tag)) return;
-    if (el.checkVisibility && !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return;
+    if (el.checkVisibility && !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
+      // display:contents の要素は自分のボックスを生成しないため checkVisibility が
+      // false になるが、子は普通に描画される（div 疑似テーブルの行などで頻出）。
+      // ここで return するとサブツリーごと未走査になり DOM 経路の塗り漏れになる
+      // （Issue #16 の fixture 作成で発覚した実バグ）ので、子孫の走査は続ける
+      if (getComputedStyle(el).display !== "contents") return;
+    }
     collectDecor(el, offset);
     if (OPAQUE_TAGS.has(tag)) return collectOpaque(el, offset, tag);
     if (tag === "iframe" || tag === "frame" || tag === "object" || tag === "embed") {
