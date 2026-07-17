@@ -102,6 +102,7 @@ async function captureAndReview(context, extensionId, fixtureRelPath, { domPath 
     checks: rects.map((r, i) => ({ ...r, orig: origBrightness[i], masked: maskedBrightness[i] })),
     statusText,
     domExtract,
+    reviewPage,
   };
 }
 
@@ -279,11 +280,59 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     // 「正常」「警告」等の一般語 td は原理的に残るため、OCR 経路の E2E 対象に
     // すると常時 red になる。単位隣接判定そのものは両経路共通の
     // rules.js/mask-decider.js にあり、ユニットテストが両経路相当を覆っている
-    const { checks, statusText } = await captureAndReview(
+    const { checks, statusText, reviewPage } = await captureAndReview(
       context, extensionId, "fixtures/dashboard.html", { domPath: true });
     expect(statusText).toContain("ページ構造を解析");
     expect(checks.length).toBeGreaterThan(0);
     assertChecks(checks, "fixtures/dashboard.html (DOM)");
+    // ワイヤーフレーム出力（Issue #20）は既定オフ: ④ボタンは表示されない
+    await expect(reviewPage.locator("#save-wireframe")).toBeHidden();
+  });
+
+  test("ワイヤーフレーム出力（Issue #20）: 設定オンで .excalidraw が保存でき、マスク文字列を含まない", async ({ context, extensionId }) => {
+    // 設定トグル相当のフラグを立ててから確認画面を開く（options.js と同じキー）
+    let [sw] = context.serviceWorkers();
+    if (!sw) sw = await context.waitForEvent("serviceworker");
+    await sw.evaluate(() => chrome.storage.local.set({ wireframeExportEnabled: true }));
+
+    const { domExtract, reviewPage } = await captureAndReview(
+      context, extensionId, "fixtures/dashboard.html", { domPath: true });
+
+    // dom-extractor が装飾ボックス（カード・棒グラフのバー・罫線）を収集していること
+    expect(domExtract.decor.length).toBeGreaterThan(0);
+
+    const btn = reviewPage.locator("#save-wireframe");
+    await expect(btn).toBeVisible();
+    await expect(btn).toBeEnabled();
+
+    const [download] = await Promise.all([
+      reviewPage.waitForEvent("download"),
+      btn.click(),
+    ]);
+    expect(download.suggestedFilename()).toBe("mask2gemini-wireframe.excalidraw");
+    const file = JSON.parse(fs.readFileSync(await download.path(), "utf8"));
+
+    // .excalidraw の骨格
+    expect(file.type).toBe("excalidraw");
+    expect(file.version).toBe(2);
+    expect(file.elements.length).toBeGreaterThan(0);
+
+    // 残るべきラベルはテキスト要素として実文字列で入る（トークンはマージ済み）
+    const texts = file.elements.filter((e) => e.type === "text").map((e) => e.text);
+    expect(texts).toContain("運用ダッシュボード");
+    expect(texts.some((t) => t.includes("稼働率"))).toBe(true);
+    // v0.7.0 の単位付き指標も残る
+    expect(texts.some((t) => t.includes("99.95%"))).toBe(true);
+
+    // マスクした文字列はファイルのどこにも含まれない（確定事項12）
+    const json = JSON.stringify(file);
+    for (const pii of ["岡田", "藤田", "健太", "128,450", "error_code", "gateway"]) {
+      expect(json).not.toContain(pii);
+    }
+    // マスク由来のハッチ矩形と、装飾由来の実色矩形（ヘッダー紺 #2b4a6f）が両方ある
+    const rects = file.elements.filter((e) => e.type === "rectangle");
+    expect(rects.some((r) => r.fillStyle === "hachure")).toBe(true);
+    expect(rects.some((r) => r.backgroundColor === "rgb(43, 74, 111)")).toBe(true);
   });
 
   test("fixtures/opaque-regions.html（DOM経路）: 読めない領域の丸塗りと要素種別判定", async ({ context, extensionId }) => {

@@ -19,6 +19,8 @@
   const NOISE_CONFIDENCE = 35;
   // デバッグ表示のON/OFFを保存するキー（chrome.storage.local）
   const DEBUG_MODE_KEY = "debugMaskVisualization";
+  // ワイヤーフレーム出力（Issue #20・確定事項12）のオプトインを保存するキー
+  const WIREFRAME_KEY = "wireframeExportEnabled";
 
   const statusEl = document.getElementById("status");
   const canvas = document.getElementById("canvas");
@@ -29,6 +31,7 @@
   const debugLegend = document.getElementById("debug-legend");
   const btnCopyDecisions = document.getElementById("copy-decisions");
   const btnCopyImage = document.getElementById("copy-image");
+  const btnSaveWireframe = document.getElementById("save-wireframe");
   const btnCopyPrompt = document.getElementById("copy-prompt");
   const btnOpenGemini = document.getElementById("open-gemini");
 
@@ -66,6 +69,9 @@
   // decisions: ブロックごとの判定ログ（「判定ログをコピー」用）。実ページでの
   // 探索テスト時に、DevTools を開かずに塗りすぎ/塗り漏れの原因を分析できるようにする
   const allDecisions = [];
+  // 確認画面で解除された自動マスク。「残す」と確定した扱いで、ワイヤーフレーム
+  // 出力（確定事項12）ではテキストとして出力する
+  const revealedMasks = [];
 
   function render() {
     ctx.drawImage(image, 0, 0);
@@ -174,6 +180,10 @@
   };
 
   let route = "OCR";
+  // ワイヤーフレーム出力用（DOM 経路のみで設定される）: 画像 px → CSS px の
+  // 除数と、dom-extractor の装飾ボックス（CSS px のまま渡す）
+  let wireframeScale = 1;
+  let wireframeDecor = [];
   if (domExtract?.viewport?.w > 0 && domExtract?.viewport?.h > 0) {
     // dom-extractor.js の座標は CSS px。画像 px への係数は「画像サイズ ÷ viewport
     // サイズ」で出す（devicePixelRatio・ページズームをまとめて吸収する）
@@ -202,7 +212,7 @@
         if (!byBlock.has(line.blockId)) byBlock.set(line.blockId, []);
         byBlock.get(line.blockId).push(line);
       }
-      for (const blockLines of byBlock.values()) {
+      for (const [blockId, blockLines] of byBlock) {
         const units = blockLines.flatMap((line) => lineToUnits({
           semantic: line.semantic,
           words: line.words.map((w) => ({
@@ -211,8 +221,15 @@
             symbols: w.symbols?.map((s) => ({ text: s.text, bbox: scaleBbox(s.bbox) })) ?? null,
           })),
         }, tokenizer));
-        applyDecided(decideParagraphMasks(units, { ...sharedDeps, ocrScale: 1 }));
+        const decided = decideParagraphMasks(units, { ...sharedDeps, ocrScale: 1 });
+        // ワイヤーフレーム出力の groupIds 用にブロック所属を記録する
+        // （画像出力・デバッグ表示には影響しない付加情報）
+        for (const m of decided.masks) m.blockId = blockId;
+        for (const k of decided.kept) k.blockId = blockId;
+        applyDecided(decided);
       }
+      wireframeScale = sx;
+      wireframeDecor = domExtract.decor ?? [];
     }
   }
 
@@ -279,6 +296,20 @@
   btnCopyPrompt.disabled = false;
   btnOpenGemini.disabled = false;
 
+  // ④ ワイヤーフレーム出力（Issue #20・確定事項12）。設定でオンのときだけ表示し、
+  // DOM 経路限定（OCR 経路は誤読テキストが編集可能ファイルに固定化されるため
+  // 無効表示にして理由を示す）
+  const { [WIREFRAME_KEY]: wireframeEnabled } = await chrome.storage.local.get(WIREFRAME_KEY);
+  if (wireframeEnabled) {
+    btnSaveWireframe.hidden = false;
+    if (route === "DOM") {
+      btnSaveWireframe.disabled = false;
+    } else {
+      btnSaveWireframe.title =
+        "画像から文字認識（OCR）したページでは使えません。誤読した文字がファイルに残るためです";
+    }
+  }
+
   // ---- 手動編集（クリックで解除・ドラッグで追加） ----
   const DRAG_THRESHOLD = 4; // これ以下の移動はクリック扱い
 
@@ -323,7 +354,10 @@
         const m = masks[i];
         if (cur.x >= m.x && cur.x <= m.x + m.w && cur.y >= m.y && cur.y <= m.y + m.h) {
           masks.splice(i, 1);
-          if (m.source === "auto" && m.text) offerAllowlistRegistration(m.text);
+          if (m.source === "auto" && m.text) {
+            revealedMasks.push(m); // ワイヤーフレーム出力ではテキストとして残す
+            offerAllowlistRegistration(m.text);
+          }
           break;
         }
       }
@@ -331,10 +365,10 @@
       // Shift+ドラッグ: 矩形と重なる自動/手動マスクをまとめて解除
       // （日付が並ぶ表やメールが列挙されたメニュー等、1件ずつのクリックが
       //   煩雑なケースの救済。個別クリックと違いホワイトリスト提示は行わない）
-      const before = masks.length;
+      const removed = masks.filter((m) => rectsOverlap(m, dragPreview));
       masks = masks.filter((m) => !rectsOverlap(m, dragPreview));
-      const removed = before - masks.length;
-      if (removed > 0) registerZone.replaceChildren();
+      revealedMasks.push(...removed.filter((m) => m.source === "auto" && m.text));
+      if (removed.length > 0) registerZone.replaceChildren();
     } else if (dragPreview && dragPreview.w > 2 && dragPreview.h > 2) {
       const { x, y, w, h } = dragPreview;
       masks.push({ x, y, w, h, source: "manual", reason: "manual" });
@@ -389,6 +423,22 @@
 
   btnOpenGemini.addEventListener("click", () => {
     chrome.tabs.create({ url: "https://gemini.google.com/" });
+  });
+
+  // ④ ワイヤーフレーム保存（確定事項12）。確認画面の確定状態（手動編集反映後）を
+  // .excalidraw へ変換してローカル保存する。マスクした文字列はファイルに含まれない
+  btnSaveWireframe.addEventListener("click", () => {
+    const file = globalThis.Mask2GeminiWireframeExporter.buildWireframe({
+      masks, kept: allKept, revealed: revealedMasks,
+      decor: wireframeDecor, scale: wireframeScale,
+    });
+    const blob = new Blob([JSON.stringify(file, null, 1)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "mask2gemini-wireframe.excalidraw";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    setStatus("ワイヤーフレームを保存しました（excalidraw.com や VS Code 拡張で編集できます）");
   });
 
   // デバッグ用: 判定結果一式を JSON でコピー（実ページでの探索テストの分析用）。

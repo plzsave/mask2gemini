@@ -12,6 +12,11 @@
 //                                             // words は常に 1 要素で、symbols に
 //                                             // 文字単位の bbox を持つ（OCR の symbol 相当）
 //     opaque: [{ x, y, w, h, kind }],         // 中身を読めない領域（丸塗り対象。確定事項10）
+//     decor: [{ x, y, w, h, bg, border, color }],
+//                                             // 可視の背景色/ボーダーを持つ装飾ボックス
+//                                             // （棒グラフのバー・カード・表の罫線等）。
+//                                             // ワイヤーフレーム出力（Issue #20）専用の
+//                                             // 収集で、マスク判定には一切使わない
 //   }
 (() => {
   "use strict";
@@ -41,6 +46,16 @@
 
   const lines = [];
   const opaque = [];
+  const decor = [];
+
+  // 装飾ボックス収集（Issue #20）のパラメータ。
+  // これ未満 (CSS px) の要素は装飾として拾わない（hr やアイコン枠などの細片は
+  // ワイヤーフレームのノイズになる）
+  const DECOR_MIN_PX = 6;
+  // viewport 面積比がこれを超える背景はページ地（body 等）とみなし除外する
+  const DECOR_MAX_AREA_RATIO = 0.8;
+  // 要素数が異常に多いページでの出力肥大防止
+  const DECOR_LIMIT = 600;
 
   // shadow 境界をまたいで親要素を辿る
   const parentOf = (n) => {
@@ -172,6 +187,34 @@
     opaque.push({ x: bbox.x0, y: bbox.y0, w: bbox.x1 - bbox.x0, h: bbox.y1 - bbox.y0, kind });
   };
 
+  // computed style の色（rgb()/rgba() 形式）が不可視（alpha 0）でないか
+  const hasVisibleColor = (c) => {
+    const m = /^rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*(?:,\s*([\d.]+)\s*)?\)$/.exec(c);
+    return Boolean(m) && (m[1] === undefined || parseFloat(m[1]) > 0);
+  };
+
+  // 装飾ボックスの収集（Issue #20）。lines/opaque と独立で、マスク判定には使わない
+  const collectDecor = (el, offset) => {
+    if (decor.length >= DECOR_LIMIT) return;
+    const s = getComputedStyle(el);
+    const bg = hasVisibleColor(s.backgroundColor);
+    const border = parseFloat(s.borderTopWidth) > 0 && s.borderTopStyle !== "none"
+      && hasVisibleColor(s.borderTopColor);
+    if (!bg && !border) return;
+    const r = el.getBoundingClientRect();
+    if (r.width < DECOR_MIN_PX || r.height < DECOR_MIN_PX) return;
+    if (r.width * r.height > vw * vh * DECOR_MAX_AREA_RATIO) return;
+    const bbox = {
+      x0: r.left + offset.x, y0: r.top + offset.y,
+      x1: r.right + offset.x, y1: r.bottom + offset.y,
+    };
+    if (outsideViewport(bbox)) return;
+    decor.push({
+      x: bbox.x0, y: bbox.y0, w: bbox.x1 - bbox.x0, h: bbox.y1 - bbox.y0,
+      bg, border, color: bg ? s.backgroundColor : s.borderTopColor,
+    });
+  };
+
   // closed shadow root は content script（isolated world）でだけ
   // chrome.dom.openOrClosedShadowRoot で覗ける。E2E 等の通常ページ実行では
   // undefined なので open shadow root のみ辿る
@@ -193,6 +236,7 @@
     const tag = el.localName;
     if (SKIP_TAGS.has(tag)) return;
     if (el.checkVisibility && !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return;
+    collectDecor(el, offset);
     if (OPAQUE_TAGS.has(tag)) return collectOpaque(el, offset, tag);
     if (tag === "iframe" || tag === "frame" || tag === "object" || tag === "embed") {
       let doc = null;
@@ -227,5 +271,5 @@
 
   visit(document.documentElement, { x: 0, y: 0 });
 
-  return { viewport: { w: vw, h: vh }, lines, opaque };
+  return { viewport: { w: vw, h: vh }, lines, opaque, decor };
 })();
