@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "mask2gemini",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "スクリーンショットをページ構造(DOM)解析＋決定的ルールでマスクし、Geminiに渡す前処理を行う（OCRフォールバック付き）",
   "action": {
     "default_title": "この画面を撮ってマスクする"
