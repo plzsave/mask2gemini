@@ -1,0 +1,8 @@
+# Actions の uses: は CI ワークフロー側でコミット SHA にピンしている。
+# その SHA の更新（新リリース追従）は Dependabot に任せる
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
