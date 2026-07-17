@@ -74,7 +74,8 @@
    */
   function decideParagraphMasks(units, deps) {
     const {
-      judge, judgeToken, findLinePatternMaskIndices, findProtectedWordIndices,
+      judge, judgeToken, findLinePatternMaskIndices, findKanjiNameRunIndices,
+      findProtectedWordIndices,
       userTerms, labelTerms, noiseConfidence, ocrScale, maskPadding,
     } = deps;
 
@@ -92,6 +93,12 @@
     // （digit-run 追加）として実装済み。今後パターンが増えても、この順序
     // （行結合確定 → confidence フィルタ）は維持すること。
     const linePatternMasked = findLinePatternMaskIndices(units);
+    // 漢字名ラン（Issue #10: 王偉・陳建国等、構成漢字が辞書に一般語として載って
+    // いて固有名詞判定をすり抜ける人名）。行結合パターンと同型だが優先順位は
+    // 大きく異なり、data-like にはしない: ユーザー登録語・ラベル辞書・DOM ラベル・
+    // NOISE_CONFIDENCE の保護がすべて勝つ（下のループ内の適用位置を参照）
+    const nameRunMasked = findKanjiNameRunIndices
+      ? findKanjiNameRunIndices(units) : new Map();
 
     // マスク矩形（padding込み）・kept矩形（padding無し）共通の座標変換
     const toRect = ({ x0, y0, x1, y1 }, padding) => ({
@@ -149,6 +156,17 @@
         if (unit.semantic === "data") {
           decide("塗:dom-data");
           masks.push({ ...toRect(unit.bbox, maskPadding), source: "auto", reason: "dom-data", text: unit.text });
+          return;
+        }
+        // 漢字名ラン（Issue #10）。テキスト判定が「残す」でも、人名らしき連結の
+        // 一部なら塗る。ただし digit-run と違い保護をバイパスしない:
+        // ラベル位置・ラベル辞書・低信頼ノイズなら塗らない（precision 維持）。
+        // ラン内の空白トークンもここを通り、addToRun のマージで隙間ごと塗られる
+        const nameRunReason = nameRunMasked.get(i);
+        if (nameRunReason && unit.semantic !== "label" && !labelProtected.has(i)
+          && unit.confidence >= noiseConfidence) {
+          decide(`塗:${nameRunReason}`);
+          addToRun(i, unit, nameRunReason);
           return;
         }
         return decide(`残:${reason}`, reason);

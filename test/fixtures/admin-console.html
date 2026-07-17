@@ -72,6 +72,17 @@
       </div>
       <button type="button" data-check="keep">絞り込み</button>
     </form>
+    <!-- Issue #10: td 外（構造判定で守られない位置）の非日本語人名。
+         構成漢字が IPADIC に一般語として載っているため固有名詞判定を
+         すり抜ける（王偉 → 王=名詞・一般、偉=形容詞・自立）。
+         kanji-run 判定で塗られること、直後の一般語複合（再申請）や
+         接尾辞付き複合（承認者）が巻き込まれないことを確認する -->
+    <p style="font-size:13px">
+      <span data-check="keep">承認者</span>:
+      <span data-check="mask">王偉</span> →
+      <span data-check="mask">陳建国</span>
+      （<span data-check="keep">再申請</span>）
+    </p>
     <table>
       <tr>
         <th data-check="keep">申請番号</th>

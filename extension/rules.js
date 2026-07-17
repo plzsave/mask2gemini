@@ -138,6 +138,73 @@
     return result;
   }
 
+  // Issue #10 事象1: 中国人名等の漢字表記は、構成漢字が IPADIC に一般語として
+  // 載っているため judgeToken の固有名詞判定をすり抜ける（例: 王偉 → 王=名詞・一般、
+  // 偉=形容詞・自立）。単体トークンでは人名と一般語を区別できないため、
+  // 「短い漢字トークンの連結」という文脈で判定する（#1 の行結合と同じ思想）。
+  //
+  // ラン成立条件（すべて AND）:
+  // - メンバー: 漢字のみのトークンで、品詞が名詞（一般・固有名詞・サ変接続）
+  //   または形容詞（自立）。接尾辞・接頭詞・非自立・数はメンバーにならず
+  //   ランを切る（承認+者、東京+都、第+二 等の複合語を巻き込まないため）
+  // - 空白トークン（記号/空白）はランを切らないが漢字数には数えない。
+  //   「王 偉」「山田 太郎」の姓名間スペース対応（kuromoji は半角/全角とも
+  //   空白を独立トークンにする）。OCR 経路は行結合時にスペースが消えるため
+  //   「王偉」形で来る。両形とも同じランとして扱う
+  // - メンバー 2 トークン以上、漢字合計 2〜4 文字（人名の典型長。5 文字以上の
+  //   連結は複合名詞の可能性が高いので対象外）
+  // - アンカー: 1 文字漢字メンバーまたは固有名詞メンバーを 1 つ以上含む
+  //   （顧客+管理のような 2字+2字 の一般語複合を除外する）
+  //
+  // digit-run と違い data-like ではない: ユーザー登録語・ラベル辞書・DOM ラベル
+  // 要素・NOISE_CONFIDENCE の保護がすべて勝つ（precision 維持。mask-decider 側）
+  const KANJI_RUN_MEMBER = /^[一-鿿々]+$/;
+  const KANJI_RUN_MIN = 2;
+  const KANJI_RUN_MAX = 4;
+  const KANJI_RUN_NOUN_DETAILS = new Set(["一般", "固有名詞", "サ変接続"]);
+
+  /**
+   * 短い漢字トークンの連結（人名らしきラン）を検出する。
+   * findLinePatternMaskIndices と同型のインターフェイス（unit index -> reason）。
+   * @param {{text: string, token: object|null}[]} units
+   * @returns {Map<number, string>}
+   */
+  function findKanjiNameRunIndices(units) {
+    const result = new Map();
+    let run = [];
+    const flush = () => {
+      const members = run.filter((r) => r.kind === "kanji");
+      const kanjiLen = members.reduce((n, r) => n + r.len, 0);
+      const anchored = members.some((r) => r.len === 1 || r.properNoun);
+      if (members.length >= 2 && kanjiLen >= KANJI_RUN_MIN && kanjiLen <= KANJI_RUN_MAX && anchored) {
+        // 端の空白はマスク対象に含めない（ランの内側の空白だけ塗る）
+        while (run.length && run[0].kind === "space") run.shift();
+        while (run.length && run[run.length - 1].kind === "space") run.pop();
+        for (const r of run) result.set(r.i, "kanji-run");
+      }
+      run = [];
+    };
+    units.forEach((u, i) => {
+      const t = u.token;
+      if (!t) return flush(); // 形態素情報が無い unit はランを構成しない
+      if (t.pos === "記号" && (t.pos_detail_1 === "空白" || t.surface_form.trim() === "")) {
+        if (run.length) run.push({ i, kind: "space" });
+        return;
+      }
+      const surface = t.surface_form;
+      const isMember = KANJI_RUN_MEMBER.test(surface)
+        && ((t.pos === "名詞" && KANJI_RUN_NOUN_DETAILS.has(t.pos_detail_1))
+          || (t.pos === "形容詞" && t.pos_detail_1 === "自立"));
+      if (isMember) {
+        run.push({ i, kind: "kanji", len: surface.length, properNoun: t.pos_detail_1 === "固有名詞" });
+      } else {
+        flush();
+      }
+    });
+    flush();
+    return result;
+  }
+
   /**
    * OCR で得た 1 単語を塗るべきか判定する。
    * @param {string} rawText
@@ -202,6 +269,7 @@
   }
 
   globalThis.Mask2GeminiRules = {
-    judge, judgeToken, findLinePatternMaskIndices, LONG_TEXT_THRESHOLD, UI_LABEL_ALLOWLIST,
+    judge, judgeToken, findLinePatternMaskIndices, findKanjiNameRunIndices,
+    LONG_TEXT_THRESHOLD, UI_LABEL_ALLOWLIST,
   };
 })();
