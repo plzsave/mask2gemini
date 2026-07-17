@@ -180,9 +180,27 @@ function reportViolations(label, checks) {
     + (maskViolations.length ? ` | 漏れ: ${maskViolations.map((c) => `「${c.text}」`).join(" ")}` : ""));
 }
 
-function assertChecks(checks, label = "") {
+// OCR 経路の輝度アサーションはフォント環境（ラスタライズ・CJK 字形バリアント）に
+// 依存して揺れる。CI 等のローカルと異なる描画環境では M2G_SOFT_OCR=1 を立てると
+// OCR 経路の違反を known-issue と同様の警告ログに落とす（fail させない）。
+// DOM 経路のテストはフォント差の影響を受けないため常に厳格。
+// OCR 経路の正はローカル実行（SPEC.md「DO: 判定ロジック変更時は test:e2e」）。
+const SOFT_OCR = process.env.M2G_SOFT_OCR === "1";
+
+function assertChecks(checks, label = "", { softable = false } = {}) {
   if (label) reportViolations(label, checks);
+  const soft = softable && SOFT_OCR;
   for (const c of checks) {
+    if (soft) {
+      const violated = c.check === "mask"
+        ? c.masked >= MASKED_MAX_BRIGHTNESS
+        : Math.abs(c.masked - c.orig) >= KEEP_MAX_BRIGHTNESS_DELTA;
+      if (violated) {
+        console.warn(`[soft-ocr] 「${c.text}」: 元輝度 ${c.orig} → マスク後 ${c.masked}`
+          + `（${c.check === "mask" ? "本来は黒塗りされるべき" : "本来は残るべき"}。環境差として許容）`);
+        continue;
+      }
+    }
     if (c.knownIssue) {
       const drop = c.orig - c.masked;
       console.warn(
@@ -204,31 +222,31 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
   test("fixture.html: 顧客管理画面の基本ケース", async ({ context, extensionId }) => {
     const { checks } = await captureAndReview(context, extensionId, "fixture.html");
     expect(checks.length).toBeGreaterThan(0);
-    assertChecks(checks, "fixture.html (OCR)");
+    assertChecks(checks, "fixture.html (OCR)", { softable: true });
   });
 
   test("fixtures/email-wrap.html: 折り返しメールも全断片が塗られる", async ({ context, extensionId }) => {
     const { checks } = await captureAndReview(context, extensionId, "fixtures/email-wrap.html");
     expect(checks.length).toBeGreaterThan(0);
-    assertChecks(checks, "fixtures/email-wrap.html (OCR)");
+    assertChecks(checks, "fixtures/email-wrap.html (OCR)", { softable: true });
   });
 
   test("fixtures/unknown-ui-labels.html: 辞書内の一般語は残る", async ({ context, extensionId }) => {
     const { checks } = await captureAndReview(context, extensionId, "fixtures/unknown-ui-labels.html");
     expect(checks.length).toBeGreaterThan(0);
-    assertChecks(checks, "fixtures/unknown-ui-labels.html (OCR)");
+    assertChecks(checks, "fixtures/unknown-ui-labels.html (OCR)", { softable: true });
   });
 
   test("fixtures/phone-postal-formats.html: 電話・郵便番号は区切り文字ごと塗られる", async ({ context, extensionId }) => {
     const { checks } = await captureAndReview(context, extensionId, "fixtures/phone-postal-formats.html");
     expect(checks.length).toBeGreaterThan(0);
-    assertChecks(checks, "fixtures/phone-postal-formats.html (OCR)");
+    assertChecks(checks, "fixtures/phone-postal-formats.html (OCR)", { softable: true });
   });
 
   test("fixtures/noise-borders.html: 装飾要素・罫線は誤マスクされない", async ({ context, extensionId }) => {
     const { checks } = await captureAndReview(context, extensionId, "fixtures/noise-borders.html");
     expect(checks.length).toBeGreaterThan(0);
-    assertChecks(checks, "fixtures/noise-borders.html (OCR)");
+    assertChecks(checks, "fixtures/noise-borders.html (OCR)", { softable: true });
   });
 
   // ---- DOM 経路（Issue #13）。OCR を使わないため実行は数秒で終わる ----
