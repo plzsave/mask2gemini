@@ -252,6 +252,16 @@
   const KANJI_RUN_MIN = 2;
   const KANJI_RUN_MAX = 4;
   const KANJI_RUN_NOUN_DETAILS = new Set(["一般", "固有名詞", "サ変接続"]);
+  // Issue #26: ひらがなの名（岡本さくら 等）。「さくら」は IPADIC 上 名詞・一般
+  // （植物）なので固有名詞判定も kanji-run（漢字限定）もすり抜ける。
+  // 「人名の固有名詞（姓）の直後に続く 1〜4 文字のひらがな名詞」に限って
+  // ランのメンバーに加える。アンカーを人名（pos_detail_2）に限定するのは
+  // 「東京みやげ」（地域+一般かな語）のような複合を巻き込まないため。
+  // 敬称（さん・様・ちゃん・くん）は 名詞・接尾 なので条件に入らない。
+  // めぐみ・ゆき・なおみ等の多くの名は IPADIC に人名として載っており
+  // proper-noun で塗られるため、この拡張が拾うのは一般語と同形の名だけ
+  const KANA_NAME_MEMBER = /^[ぁ-ゖー]{1,4}$/;
+  const KANA_NAME_DETAILS = new Set(["一般", "固有名詞"]);
 
   /**
    * 短い漢字トークンの連結（人名らしきラン）を検出する。
@@ -263,16 +273,28 @@
     const result = new Map();
     let run = [];
     const flush = () => {
-      const members = run.filter((r) => r.kind === "kanji");
-      const kanjiLen = members.reduce((n, r) => n + r.len, 0);
-      const anchored = members.some((r) => r.len === 1 || r.properNoun);
-      if (members.length >= 2 && kanjiLen >= KANJI_RUN_MIN && kanjiLen <= KANJI_RUN_MAX && anchored) {
+      const kanjiMembers = run.filter((r) => r.kind === "kanji");
+      const kanaMembers = run.filter((r) => r.kind === "kana");
+      const kanjiLen = kanjiMembers.reduce((n, r) => n + r.len, 0);
+      const anchored = kanjiMembers.some((r) => r.len === 1 || r.properNoun);
+      const kanjiRunOk = kanjiMembers.length >= 2
+        && kanjiLen >= KANJI_RUN_MIN && kanjiLen <= KANJI_RUN_MAX && anchored;
+      // かなメンバーは「人名アンカーの直後」でしか run に入れない（下の
+      // 参加条件）ため、存在すればそれだけでラン成立（Issue #26）
+      if (kanjiRunOk || kanaMembers.length > 0) {
         // 端の空白はマスク対象に含めない（ランの内側の空白だけ塗る）
         while (run.length && run[0].kind === "space") run.shift();
         while (run.length && run[run.length - 1].kind === "space") run.pop();
-        for (const r of run) result.set(r.i, "kanji-run");
+        const reason = kanaMembers.length > 0 ? "kana-name" : "kanji-run";
+        for (const r of run) result.set(r.i, reason);
       }
       run = [];
+    };
+    const lastMember = () => {
+      for (let k = run.length - 1; k >= 0; k--) {
+        if (run[k].kind !== "space") return run[k];
+      }
+      return null;
     };
     units.forEach((u, i) => {
       const t = u.token;
@@ -285,8 +307,24 @@
       const isMember = KANJI_RUN_MEMBER.test(surface)
         && ((t.pos === "名詞" && KANJI_RUN_NOUN_DETAILS.has(t.pos_detail_1))
           || (t.pos === "形容詞" && t.pos_detail_1 === "自立"));
+      // ひらがなの名（Issue #26）: 直前のメンバーが人名の固有名詞（姓）の
+      // 場合のみラン参加を許す。ランの先頭にはなれない
+      const prev = lastMember();
+      const isKanaGivenName = !isMember
+        && KANA_NAME_MEMBER.test(surface)
+        && t.pos === "名詞" && KANA_NAME_DETAILS.has(t.pos_detail_1)
+        && prev?.kind === "kanji" && prev.jinmei;
       if (isMember) {
-        run.push({ i, kind: "kanji", len: surface.length, properNoun: t.pos_detail_1 === "固有名詞" });
+        // かな名の後に漢字が続く場合（岡本さくら保育園 等）は別ラン扱いにし、
+        // 施設名などの後続複合語を巻き込まない
+        if (prev?.kind === "kana") flush();
+        run.push({
+          i, kind: "kanji", len: surface.length,
+          properNoun: t.pos_detail_1 === "固有名詞",
+          jinmei: t.pos_detail_1 === "固有名詞" && t.pos_detail_2 === "人名",
+        });
+      } else if (isKanaGivenName) {
+        run.push({ i, kind: "kana", len: surface.length });
       } else {
         flush();
       }
