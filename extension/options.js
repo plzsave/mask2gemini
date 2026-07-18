@@ -106,4 +106,9 @@
       ev.target.value = "";
     }
   });
+
+  // バージョン表示（Issue #33）。zip 手動配布で自動更新が無いため、
+  // 利用者が「いま使っている版」を確認できる場所を設定画面に置く
+  document.getElementById("version").textContent =
+    `mask2gemini v${chrome.runtime.getManifest().version}`;
 })();

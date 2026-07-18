@@ -53,7 +53,8 @@ const optionsPage = await context.newPage();
 await optionsPage.setViewportSize({ width: 1000, height: 700 });
 await optionsPage.goto(`chrome-extension://${extensionId}/options.html`);
 await optionsPage.waitForTimeout(500);
-await optionsPage.screenshot({ path: path.join(outDir, "options.png") });
+// fullPage: バージョン表示（Issue #33）などページ末尾の要素まで写す
+await optionsPage.screenshot({ path: path.join(outDir, "options.png"), fullPage: true });
 console.log("guide/options.png を生成");
 
 await context.close();
