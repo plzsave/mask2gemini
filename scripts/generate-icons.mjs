@@ -10,61 +10,74 @@ import { fileURLToPath } from "node:url";
 const outDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "extension", "icons");
 fs.mkdirSync(outDir, { recursive: true });
 
-// モチーフ: ファインダー枠（撮影）の中に、クリップボード（貼り付け先）へ挟まれた
-// スクリーンショット。中身はラベル行（灰）が残り、データ行（黒バー）がマスク済み
-// — 「撮影 → マスク → クリップボードへ」の一連の流れを 1 枚で表す
+// モチーフ: 斜め上から見た 3 層スタック。上から
+//   1層目 = 撮影（レンズリング＋照準ティック）
+//   2層目 = マスク済みページ（ラベル行が残り、データ行が黒塗り）
+//   3層目 = クリップボード（コピーの行き先。確定事項4のとおり受け渡しはここまで）
+// 各層のグリフも板と同じ iso 変形に乗せ、パースを統一する
+
+// 板 1 枚 = 上面（rotate45 + scale(1,0.55) した角丸矩形）＋厚み（下へずらした暗色）
+const plate = (cy, w, topFill, sideFill, content = "") => `
+  <g transform="translate(64,${cy + 8}) scale(1,0.55) rotate(45)">
+    <rect x="${-w / 2}" y="${-w / 2}" width="${w}" height="${w}" rx="14" fill="${sideFill}"/>
+  </g>
+  <g transform="translate(64,${cy}) scale(1,0.55) rotate(45)">
+    <rect x="${-w / 2}" y="${-w / 2}" width="${w}" height="${w}" rx="14" fill="${topFill}"/>
+    ${content}
+  </g>`;
+
+// 1層目（撮影）: レンズリング＋照準ティック（クロスヘア）
+const captureContent = `
+  <circle r="11" fill="none" stroke="#ffffff" stroke-width="6"/>
+  <g stroke="#ffffff" stroke-width="5" stroke-linecap="round">
+    <line x1="0" y1="-24" x2="0" y2="-18"/>
+    <line x1="0" y1="18" x2="0" y2="24"/>
+    <line x1="-24" y1="0" x2="-18" y2="0"/>
+    <line x1="18" y1="0" x2="24" y2="0"/>
+  </g>`;
+
+// 2層目（マスク済みページ）: ラベル行（灰）＋黒塗りバー。上の板に隠れない
+// 下半分の見える帯に寄せる
+const maskContent = `
+  <rect x="-20" y="-14" width="24" height="7" rx="3.5" fill="#b0bec5"/>
+  <rect x="-20" y="0" width="40" height="11" rx="3" fill="#111111"/>
+  <rect x="-20" y="18" width="28" height="11" rx="3" fill="#111111"/>`;
+
+// 3層目（クリップボード）: 白い紙面＋留め金＋罫線。板と同じ iso 変形のまま
+// （正面向きに起こすと「シールを貼った」ような浮きが出るため。ユーザー確定）
+const clipboardContent = `
+  <g transform="translate(4,4)">
+    <rect x="-13" y="-14" width="26" height="30" rx="4" fill="#ffffff"/>
+    <rect x="-5" y="-18" width="10" height="7" rx="3" fill="#37474f"/>
+    <rect x="-8" y="-5" width="16" height="4" rx="2" fill="#b0bec5"/>
+    <rect x="-8" y="4" width="12" height="4" rx="2" fill="#b0bec5"/>
+  </g>`;
+
 const DETAILED = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="24" fill="#3949ab"/>
-  <!-- クリップボードの板と留め金 -->
-  <rect x="30" y="24" width="68" height="90" rx="8" fill="#eceff1"/>
-  <rect x="53" y="15" width="22" height="16" rx="6" fill="#78909c"/>
-  <rect x="60" y="19" width="8" height="5" rx="2.5" fill="#eceff1"/>
-  <!-- 挟まれたスクリーンショット（ミニブラウザウィンドウ） -->
-  <rect x="37" y="36" width="54" height="70" rx="4" fill="#ffffff" stroke="#cfd8dc" stroke-width="2"/>
-  <path d="M38 40 a3 3 0 0 1 3-3 h46 a3 3 0 0 1 3 3 v7 h-52 z" fill="#e3e7ea"/>
-  <circle cx="44" cy="42" r="2.2" fill="#ef5350"/>
-  <circle cx="51" cy="42" r="2.2" fill="#ffb300"/>
-  <circle cx="58" cy="42" r="2.2" fill="#66bb6a"/>
-  <!-- 残るラベル行（灰）とマスク済みデータ行（黒） -->
-  <rect x="43" y="54" width="26" height="5" rx="2.5" fill="#b0bec5"/>
-  <rect x="43" y="63" width="42" height="8" rx="2" fill="#111111"/>
-  <rect x="43" y="77" width="20" height="5" rx="2.5" fill="#b0bec5"/>
-  <rect x="43" y="86" width="34" height="8" rx="2" fill="#111111"/>
-  <rect x="43" y="98" width="30" height="5" rx="2.5" fill="#b0bec5"/>
-  <!-- ファインダー枠（撮影） -->
-  <g stroke="#ffffff" stroke-width="6" fill="none" stroke-linecap="round">
-    <path d="M12 30 v-10 a8 8 0 0 1 8-8 h10"/>
-    <path d="M98 12 h10 a8 8 0 0 1 8 8 v10"/>
-    <path d="M116 98 v10 a8 8 0 0 1 -8 8 h-10"/>
-    <path d="M30 116 h-10 a8 8 0 0 1 -8 -8 v-10"/>
-  </g>
+  <rect width="128" height="128" rx="24" fill="#283593"/>
+  ${plate(100, 52, "#90a4ae", "#546e7a", clipboardContent)}
+  ${plate(64, 52, "#eceff1", "#90a4ae", maskContent)}
+  ${plate(28, 52, "#7986cb", "#3f51b5", captureContent)}
 </svg>`;
 
-// 16/32px 用の簡略版。縮小で潰れる装飾（ウィンドウバー・留め金の穴・細部）を
-// 落とし、「クリップボード＋黒塗りバー＋ファインダー枠」だけを太く残す
+// 32px 用: 各層の中身を 1 要素まで減らす
 const SIMPLE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="24" fill="#3949ab"/>
-  <rect x="30" y="22" width="68" height="92" rx="10" fill="#ffffff"/>
-  <rect x="50" y="10" width="28" height="20" rx="7" fill="#78909c"/>
-  <rect x="40" y="44" width="34" height="10" rx="4" fill="#b0bec5"/>
-  <rect x="40" y="64" width="48" height="16" rx="4" fill="#111111"/>
-  <rect x="40" y="90" width="36" height="16" rx="4" fill="#111111"/>
-  <g stroke="#ffffff" stroke-width="10" fill="none" stroke-linecap="round">
-    <path d="M10 32 v-12 a10 10 0 0 1 10-10 h12"/>
-    <path d="M96 10 h12 a10 10 0 0 1 10 10 v12"/>
-    <path d="M118 96 v12 a10 10 0 0 1 -10 10 h-12"/>
-    <path d="M32 118 h-12 a10 10 0 0 1 -10 -10 v-12"/>
-  </g>
+  <rect width="128" height="128" rx="24" fill="#283593"/>
+  ${plate(98, 58, "#90a4ae", "#546e7a")}
+  ${plate(64, 58, "#ffffff", "#90a4ae", `<rect x="-20" y="2" width="40" height="14" rx="4" fill="#111111"/>`)}
+  ${plate(30, 58, "#7986cb", "#3f51b5", `<circle r="10" fill="none" stroke="#ffffff" stroke-width="7"/>`)}
 </svg>`;
 
-// 16px ではファインダー枠が縁のノイズにしかならないため外し、
-// クリップボード＋黒塗りバーだけを残す
-const TINY = SIMPLE.replace(/<g stroke[\s\S]*?<\/g>\n/, "");
+// 16px 用: タイル無しで板 3 枚だけ。中段の黒バーが「マスク」の記号として残る
+const TINY = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  ${plate(102, 62, "#78909c", "#455a64")}
+  ${plate(64, 62, "#ffffff", "#90a4ae", `<rect x="-22" y="0" width="44" height="18" rx="5" fill="#111111"/>`)}
+  ${plate(26, 62, "#5c6bc0", "#303f9f")}
+</svg>`;
 
 const browser = await chromium.launch({ channel: "chromium" });
 const page = await browser.newPage();
-for (const size of [16, 32, 48, 128]) {
-  const svg = size === 16 ? TINY : size === 32 ? SIMPLE : DETAILED;
+for (const [size, svg] of [[16, TINY], [32, SIMPLE], [48, DETAILED], [128, DETAILED]]) {
   await page.setViewportSize({ width: size, height: size });
   await page.setContent(
     `<style>html,body{margin:0}svg{display:block}</style>`
