@@ -13,13 +13,15 @@
       <span id="register-zone"></span>
     </div>
     <div class="toolbar-right">
-      <!-- 主導線（①→②→③）。実行済みは .done、次にやる操作は .next で強調する（Issue #29） -->
+      <!-- 主導線（①→②→③）。実行済みは .done、次にやる操作は .next で強調する（Issue #29）。
+           順序は実際の利用順: 画像コピー → Gemini で貼り付け → 戻ってプロンプトをコピーして貼り付け。
+           ②と③の間で Gemini へ画像を貼るため、クリップボードは 1 段ずつしか使わない -->
       <div class="steps">
         <button id="copy-image" class="step" disabled>① マスク済み画像をコピー</button>
         <span class="step-arrow" aria-hidden="true">→</span>
-        <button id="copy-prompt" class="step" disabled>② プロンプトをコピー</button>
+        <button id="open-gemini" class="step" disabled>② Gemini を開いて貼り付け</button>
         <span class="step-arrow" aria-hidden="true">→</span>
-        <button id="open-gemini" class="step" disabled>③ Gemini を開く</button>
+        <button id="copy-prompt" class="step" disabled>③ プロンプトをコピー</button>
       </div>
       <span class="toolbar-sep" aria-hidden="true"></span>
       <button id="save-wireframe" hidden disabled>ワイヤーフレームを保存 (.excalidraw)</button>

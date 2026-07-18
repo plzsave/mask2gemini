@@ -447,6 +447,8 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
 
     await reviewPage.locator("#debug-toggle").uncheck();
     await expect(reviewPage.locator("#debug-overlay")).not.toHaveClass(/visible/);
+    // OFF にしたら reason 凡例も消えること（Issue #29 レビューで発見した取り残し）
+    await expect(reviewPage.locator("#debug-legend .legend-item")).toHaveCount(0);
     expect(await canvasDataUrl()).toBe(beforeDebug);
   });
 
@@ -456,9 +458,11 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
   test("review.html: ステップ進行表示（実行で✓、マスク編集で①が戻る）", async ({ context, extensionId }) => {
     const { reviewPage } = await captureAndReview(
       context, extensionId, "fixtures/dashboard.html", { domPath: true });
+    // 実利用順（クリップボードを 1 段ずつ使う並び）:
+    // ① 画像をコピー → ② Gemini を開いて貼り付け → ③ プロンプトをコピー
     const step1 = reviewPage.locator("#copy-image");
-    const step2 = reviewPage.locator("#copy-prompt");
-    const step3 = reviewPage.locator("#open-gemini");
+    const step2 = reviewPage.locator("#open-gemini");
+    const step3 = reviewPage.locator("#copy-prompt");
 
     // 初期状態: ① だけが「次にやる操作」
     await expect(step1).toHaveClass(/next/);
@@ -473,6 +477,7 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     await step2.click();
     await expect(step2).toHaveClass(/done/);
     await expect(step3).toHaveClass(/next/);
+    await reviewPage.bringToFront(); // ② は Gemini タブを開くので確認画面へ戻す
 
     // マスクをドラッグ追加 → コピー済み画像（①）が古くなるので ① だけ未実行に戻る
     const canvasBox = await reviewPage.locator("#canvas").boundingBox();

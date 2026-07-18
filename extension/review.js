@@ -42,8 +42,11 @@
   const setStatus = (text) => { statusEl.textContent = text; };
 
   // 主導線（①→②→③）のステップ進行表示（Issue #29 案B）。実行済みは .done、
-  // 次にやる操作は .next で 1 つだけ強調する。表示だけの状態で保存はしない
-  const stepButtons = [btnCopyImage, btnCopyPrompt, btnOpenGemini];
+  // 次にやる操作は .next で 1 つだけ強調する。表示だけの状態で保存はしない。
+  // 順序は実利用順（画像コピー → Gemini で貼り付け → プロンプトをコピー）。
+  // 画像とプロンプトを続けてコピーするとクリップボードが上書きされるため、
+  // 「コピー → 貼り付け」を 1 段ずつ挟む並びにしている
+  const stepButtons = [btnCopyImage, btnOpenGemini, btnCopyPrompt];
   const stepDone = [false, false, false];
   function renderSteps() {
     const nextIndex = stepDone.indexOf(false);
@@ -129,7 +132,10 @@
     overlayCanvas.classList.toggle("visible", debugToggle.checked);
     btnCopyDecisions.hidden = !debugToggle.checked;
     overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-    if (!debugToggle.checked) return;
+    if (!debugToggle.checked) {
+      debugLegend.replaceChildren(); // OFF にしたら凡例も消す
+      return;
+    }
     overlayCtx.lineWidth = 2;
     overlayCtx.setLineDash([]);
     for (const m of masks) {
@@ -447,18 +453,19 @@
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
     await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
     completeStep(0);
-    setStatus("マスク済み画像をコピーしました。Gemini の入力欄に貼り付けてください。");
+    setStatus("マスク済み画像をコピーしました。② で Gemini を開き、入力欄に貼り付けてください。");
+  });
+
+  btnOpenGemini.addEventListener("click", () => {
+    completeStep(1);
+    setStatus("Gemini に画像を貼り付けたら、この画面に戻って ③ でプロンプトをコピーしてください。");
+    chrome.tabs.create({ url: "https://gemini.google.com/" });
   });
 
   btnCopyPrompt.addEventListener("click", async () => {
     await navigator.clipboard.writeText(PROMPT_TEMPLATE);
-    completeStep(1);
-    setStatus("プロンプトをコピーしました。画像 → プロンプトの順に貼り付け、要望部分を書き換えて使ってください。");
-  });
-
-  btnOpenGemini.addEventListener("click", () => {
     completeStep(2);
-    chrome.tabs.create({ url: "https://gemini.google.com/" });
+    setStatus("プロンプトをコピーしました。Gemini に貼り付け、要望部分を書き換えて送信してください。");
   });
 
   // アイコン領域（Issue #23）をマスク済みキャンバスから切り抜く。切り抜き元は
