@@ -452,6 +452,34 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     expect(await canvasDataUrl()).toBe(beforeDebug);
   });
 
+  // Issue #34: 撮影失敗時、生の例外文字列ではなく非エンジニア向けの
+  // 日本語メッセージがステータスに出ること
+  test("review.html: 撮影エラーが非エンジニア向けの文言に変換される", async ({ context, extensionId }) => {
+    let [sw] = context.serviceWorkers();
+    if (!sw) sw = await context.waitForEvent("serviceworker");
+
+    const cases = [
+      // [background.js が保存する生エラー例, 期待する文言の一部]
+      ["Error: Exceeded MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND.", "撮影の間隔が短すぎます"],
+      ["Error: The 'activeTab' permission is not in effect", "このページは撮影できません"],
+      ["Error: Resource::kQuotaBytes quota exceeded", "画像が大きすぎて保存できませんでした"],
+      // 判別できないエラーは汎用メッセージに落ちる（生文字列を表示しない）
+      ["Error: something unexpected", "撮影データがありません"],
+    ];
+    for (const [raw, expected] of cases) {
+      await sw.evaluate(async (captureError) => {
+        await chrome.storage.session.remove(["capture", "captureError", "domExtract", "domExtractError"]);
+        await chrome.storage.session.set({ captureError });
+      }, raw);
+      const reviewPage = await context.newPage();
+      await reviewPage.goto(`chrome-extension://${extensionId}/review.html`);
+      const status = reviewPage.locator("#status");
+      await expect(status).toContainText(expected);
+      await expect(status).not.toContainText("Error:");
+      await reviewPage.close();
+    }
+  });
+
   // Issue #29 案B: 主導線（①→②→③）のステップ進行表示。
   // 実行済みは .done、次にやる操作は .next で 1 つだけ強調され、
   // マスクを編集し直すと ①（コピー済み画像が古くなる）だけ未実行に戻る
