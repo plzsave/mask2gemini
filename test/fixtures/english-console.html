@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Customer Admin Console (English UI fixture)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f5f6f8; color: #222; display: grid; grid-template-columns: 200px 1fr; grid-template-rows: 52px 1fr; height: 100vh; }
+    header { grid-column: 1 / 3; background: #263445; color: #fff; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; }
+    header h1 { font-size: 16px; margin: 0; }
+    .sidebar { background: #1f2a38; color: #cfd8e3; padding: 16px 0; }
+    .sidebar a { display: block; color: inherit; text-decoration: none; padding: 9px 20px; font-size: 14px; }
+    .sidebar a.active { background: #3b5273; color: #fff; }
+    main { padding: 20px 24px; overflow: auto; }
+    form.filters { display: flex; gap: 16px; align-items: end; background: #fff; border: 1px solid #d0d5da; padding: 12px 16px; margin-bottom: 16px; font-size: 13px; }
+    form.filters label { display: block; margin-bottom: 4px; color: #445; }
+    form.filters input { font-size: 13px; padding: 6px 8px; border: 1px solid #c6ccd4; border-radius: 3px; }
+    form.filters button { padding: 7px 18px; }
+    table { border-collapse: collapse; background: #fff; width: 100%; font-size: 13px; }
+    th, td { border: 1px solid #d0d5da; padding: 9px 12px; text-align: left; }
+    th { background: #e8ecf1; }
+  </style>
+</head>
+<body>
+  <!-- すべて架空のダミーデータ。英語 UI の SaaS 管理画面を模し、英語圏 PII
+       （人名・住所・国際形式電話・メール）の recall と、英語 UI ラベル
+       （UI_LABEL_ALLOWLIST の英語語彙）の keep を検証する（Issue #36）。
+       日本語 fixture と異なり全トークンが ASCII_WORD 判定を通る点が肝 -->
+  <header>
+    <h1 data-check="keep">Account Overview</h1>
+    <!-- nav 外のユーザー名は塗られるべき -->
+    <span>Signed in: <span data-check="mask">Rachel Kowalski</span></span>
+  </header>
+  <nav class="sidebar">
+    <a href="#" data-check="keep">Dashboard</a>
+    <a href="#" class="active" data-check="keep">Users</a>
+    <a href="#" data-check="keep">Reports</a>
+    <a href="#" data-check="keep">Notifications</a>
+    <a href="#" data-check="keep">Settings</a>
+  </nav>
+  <main>
+    <form class="filters">
+      <div>
+        <label for="f-name" data-check="keep">Name</label>
+        <input id="f-name" data-check="mask" data-known-issue="44" value="Emily Johnson" size="14">
+      </div>
+      <div>
+        <label for="f-email" data-check="keep">Email</label>
+        <input id="f-email" data-check="mask" data-known-issue="44" value="emily.j@acmecorp.io" size="20">
+      </div>
+      <button type="button" data-check="keep">Search</button>
+      <button type="button" data-check="keep">Export</button>
+    </form>
+    <table>
+      <thead>
+        <tr>
+          <th data-check="keep">Name</th>
+          <th data-check="keep">Email</th>
+          <th data-check="keep">Phone</th>
+          <th data-check="keep">Address</th>
+          <th data-check="keep">Amount</th>
+          <th data-check="keep">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td data-check="mask">John Smith</td>
+          <td data-check="mask">john.smith@example.com</td>
+          <td data-check="mask">+1 (415) 555-0182</td>
+          <td data-check="mask">742 Evergreen Terrace, Springfield, IL 62704</td>
+          <td data-check="mask">$1,240.00</td>
+          <!-- ステータス語は意図的に UI_LABEL_ALLOWLIST 外の語彙にしている。
+               辞書内の語（Active 等）は OCR 経路では保護されて残る（要素種別判定は
+               DOM 限定）ため、両経路共通の mask 期待にできない。
+               「td 内の辞書語が DOM 経路で塗られる」検証は opaque-regions.html が担当 -->
+          <td data-check="mask">Overdue</td>
+        </tr>
+        <tr>
+          <td data-check="mask">Michael O'Brien</td>
+          <td data-check="mask">m.obrien@nwlogistics.co.uk</td>
+          <td data-check="mask">+44 20 7946 0958</td>
+          <td data-check="mask">221B Baker Street, London NW1 6XE</td>
+          <td data-check="mask">£980.50</td>
+          <td data-check="mask">Suspended</td>
+        </tr>
+        <tr>
+          <!-- 3文字以下の英語名（Issue #10: Ana Lee 級の塗り漏れ回帰確認） -->
+          <td data-check="mask">Ana Lee</td>
+          <td data-check="mask">ana@lee.io</td>
+          <td data-check="mask">+81 90-1234-5678</td>
+          <td data-check="mask">5-2-1 Ginza, Chuo-ku, Tokyo</td>
+          <td data-check="mask">¥42,000</td>
+          <td data-check="mask">Churned</td>
+        </tr>
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>

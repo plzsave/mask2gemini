@@ -250,7 +250,22 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     assertChecks(checks, "fixtures/noise-borders.html (OCR)", { softable: true });
   });
 
+  test("fixtures/english-console.html: 英語圏PIIの塗り漏れと英語UIラベルの過剰マスク（Issue #36）", async ({ context, extensionId }) => {
+    // 英語 UI の SaaS 管理画面。OCR は jpn+eng で走るため OCR 経路でも検証する
+    const { checks } = await captureAndReview(context, extensionId, "fixtures/english-console.html");
+    expect(checks.length).toBeGreaterThan(0);
+    assertChecks(checks, "fixtures/english-console.html (OCR)", { softable: true });
+  });
+
   // ---- DOM 経路（Issue #13）。OCR を使わないため実行は数秒で終わる ----
+
+  test("fixtures/english-console.html（DOM経路）: 英語圏PIIと英語UIラベル（Issue #36）", async ({ context, extensionId }) => {
+    const { checks, statusText } = await captureAndReview(
+      context, extensionId, "fixtures/english-console.html", { domPath: true });
+    expect(statusText).toContain("ページ構造を解析");
+    expect(checks.length).toBeGreaterThan(0);
+    assertChecks(checks, "fixtures/english-console.html (DOM)");
+  });
 
   test("fixture.html（DOM経路）: OCR と同じ期待結果を DOM 抽出で満たす", async ({ context, extensionId }) => {
     const { checks, statusText } = await captureAndReview(
