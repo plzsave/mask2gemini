@@ -52,17 +52,38 @@ async function captureAndReview(context, extensionId, fixtureRelPath, { domPath 
   // 広がるため、getBoundingClientRect() をそのまま使うと実際の文字グリフより
   // 広い範囲（余白）をサンプリングしてしまう。Range で文字ノードそのものの
   // 矩形を取り、OCR が実際に検出する範囲に近づける。テキストを持たない要素
-  // （img/canvas/iframe 等、丸塗り対象）は要素矩形をそのまま使う
+  // （img/canvas/iframe 等、丸塗り対象）は要素矩形をそのまま使う。
+  // <input> は value が子テキストノードにならず Range が使えないため、
+  // measureText で値テキストの実描画幅を求めて「文字が写っている範囲」だけを測る
+  // （要素全体だと右側の白い余白が混ざり、正しく塗られていても明るく見えて
+  //   塗り漏れと誤判定する。#44 の教訓）
   const rects = await fixturePage.$$eval("[data-check]", (els) =>
     els.map((el) => {
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      let r = range.getBoundingClientRect();
-      if (r.width === 0 || r.height === 0) r = el.getBoundingClientRect();
+      let r;
+      if (el.tagName === "INPUT" && el.value) {
+        const cs = getComputedStyle(el);
+        const mctx = document.createElement("canvas").getContext("2d");
+        mctx.font = `${cs.fontSize} ${cs.fontFamily}`;
+        const box = el.getBoundingClientRect();
+        const left = parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft);
+        // 縦も上下 padding を除き、値テキストの行の帯だけを測る
+        const lineH = parseFloat(cs.fontSize) * 1.3;
+        r = {
+          x: box.x + left,
+          y: box.y + (box.height - lineH) / 2,
+          width: Math.min(mctx.measureText(el.value).width, box.width - left),
+          height: lineH,
+        };
+      } else {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        r = range.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) r = el.getBoundingClientRect();
+      }
       return {
         check: el.dataset.check,
         knownIssue: el.dataset.knownIssue || null,
-        text: el.textContent.trim() || el.className || el.tagName.toLowerCase(),
+        text: el.textContent.trim() || el.value || el.className || el.tagName.toLowerCase(),
         x: r.x, y: r.y, w: r.width, h: r.height,
       };
     }));
