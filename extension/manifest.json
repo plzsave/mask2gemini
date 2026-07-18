@@ -3,8 +3,20 @@
   "name": "mask2gemini",
   "version": "0.11.0",
   "description": "スクリーンショットをページ構造(DOM)解析＋決定的ルールでマスクし、Geminiに渡す前処理を行う（OCRフォールバック付き）",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "action": {
-    "default_title": "この画面を撮ってマスクする"
+    "default_title": "この画面を撮ってマスクする",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "background": {
     "service_worker": "background.js"
