@@ -21,7 +21,37 @@ body {
   border-bottom: 1px solid #3a4046;
 }
 .toolbar-left { display: flex; align-items: baseline; gap: 0.8rem; }
-.toolbar-right { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.toolbar-right { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+
+/* 主導線（①→②→③）のステップ表示（Issue #29 案B） */
+.steps { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
+.step-arrow { color: #5f6a70; font-size: 0.85rem; user-select: none; }
+/* 実行済み: ✓ を付けて沈める。マスクを編集し直すと ① は未実行に戻る */
+button.step.done {
+  background: #253b33;
+  border-color: #3d947a;
+  color: #9fd0bf;
+}
+button.step.done::before { content: "✓ "; }
+/* 次にやる操作: primary 色で 1 つだけ強調する */
+button.step.next {
+  background: #2f7a63;
+  border-color: #7db8a8;
+  color: #f2f7f5;
+  font-weight: 600;
+}
+button.step.next:hover:not(:disabled) { background: #389075; }
+
+/* 主導線と副次操作（ワイヤーフレーム保存・設定）の区切り */
+.toolbar-sep { width: 1px; align-self: stretch; background: #3a4046; }
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: #9aa4ad;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+button.ghost:hover:not(:disabled) { background: #2e3439; }
 
 #status { font-size: 0.85rem; color: #9aa4ad; }
 
@@ -40,16 +70,22 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 button:focus-visible { outline: 2px solid #7db8a8; outline-offset: 2px; }
 
 .hint {
+  display: flex;
+  gap: 1.1rem;
+  flex-wrap: wrap;
   padding: 0.5rem 1rem;
   font-size: 0.82rem;
   color: #9aa4ad;
 }
+.hint span::before { content: "· "; color: #5f6a70; }
 
 .stage {
   padding: 0 1rem 2rem;
   overflow: auto;
 }
 
+/* display: flex が hidden 属性の既定 (display: none) を上書きしないようにする */
+.debug-bar[hidden] { display: none; }
 .debug-bar {
   display: flex;
   align-items: center;

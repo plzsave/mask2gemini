@@ -13,20 +13,29 @@
       <span id="register-zone"></span>
     </div>
     <div class="toolbar-right">
-      <button id="copy-image" disabled>① マスク済み画像をコピー</button>
-      <button id="copy-prompt" disabled>② プロンプトをコピー</button>
-      <button id="open-gemini" disabled>③ Gemini を開く</button>
-      <button id="save-wireframe" hidden disabled>④ ワイヤーフレームを保存 (.excalidraw)</button>
-      <button id="open-options" title="ホワイトリスト設定">設定</button>
+      <!-- 主導線（①→②→③）。実行済みは .done、次にやる操作は .next で強調する（Issue #29）。
+           順序は実際の利用順: 画像コピー → Gemini で貼り付け → 戻ってプロンプトをコピーして貼り付け。
+           ②と③の間で Gemini へ画像を貼るため、クリップボードは 1 段ずつしか使わない -->
+      <div class="steps">
+        <button id="copy-image" class="step" disabled>① マスク済み画像をコピー</button>
+        <span class="step-arrow" aria-hidden="true">→</span>
+        <button id="open-gemini" class="step" disabled>② Gemini を開いて貼り付け</button>
+        <span class="step-arrow" aria-hidden="true">→</span>
+        <button id="copy-prompt" class="step" disabled>③ プロンプトをコピー</button>
+      </div>
+      <span class="toolbar-sep" aria-hidden="true"></span>
+      <button id="save-wireframe" hidden disabled>ワイヤーフレームを保存 (.excalidraw)</button>
+      <button id="open-options" class="ghost" title="ホワイトリスト設定">設定</button>
     </div>
   </header>
   <p class="hint">
-    黒塗りは<strong>クリックで解除</strong>、足りない箇所は<strong>ドラッグで追加</strong>、
-    まとめて外したいときは<strong>Shift+ドラッグで範囲内を一括解除</strong>できます。
-    コピーされるのは常にマスク適用後の画像です。Gemini には画像 → プロンプトの順に貼り付けてください。
+    <span>クリック: 黒塗りを解除</span>
+    <span>ドラッグ: 黒塗りを追加</span>
+    <span>Shift+ドラッグ: 範囲内を一括解除</span>
   </p>
   <main class="stage">
-    <div class="debug-bar">
+    <!-- エンジニア向け。設定でデバッグ表示を有効にしたときだけ現れる（Issue #29） -->
+    <div class="debug-bar" id="debug-bar" hidden>
       <label class="debug-toggle-label">
         <input type="checkbox" id="debug-toggle">
         デバッグ表示（判定reasonを枠色で表示）

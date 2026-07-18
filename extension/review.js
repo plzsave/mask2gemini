@@ -19,6 +19,9 @@
   const NOISE_CONFIDENCE = 35;
   // デバッグ表示のON/OFFを保存するキー（chrome.storage.local）
   const DEBUG_MODE_KEY = "debugMaskVisualization";
+  // デバッグ表示 UI 自体のオプトイン（Issue #29）。設定画面のエンジニア向け
+  // オプションでオンにしたときだけ確認画面に .debug-bar を出す
+  const DEBUG_PANEL_KEY = "debugPanelEnabled";
   // ワイヤーフレーム出力（Issue #20・確定事項12）のオプトインを保存するキー
   const WIREFRAME_KEY = "wireframeExportEnabled";
 
@@ -27,6 +30,7 @@
   const ctx = canvas.getContext("2d");
   const overlayCanvas = document.getElementById("debug-overlay");
   const overlayCtx = overlayCanvas.getContext("2d");
+  const debugBar = document.getElementById("debug-bar");
   const debugToggle = document.getElementById("debug-toggle");
   const debugLegend = document.getElementById("debug-legend");
   const btnCopyDecisions = document.getElementById("copy-decisions");
@@ -36,6 +40,22 @@
   const btnOpenGemini = document.getElementById("open-gemini");
 
   const setStatus = (text) => { statusEl.textContent = text; };
+
+  // 主導線（①→②→③）のステップ進行表示（Issue #29 案B）。実行済みは .done、
+  // 次にやる操作は .next で 1 つだけ強調する。表示だけの状態で保存はしない。
+  // 順序は実利用順（画像コピー → Gemini で貼り付け → プロンプトをコピー）。
+  // 画像とプロンプトを続けてコピーするとクリップボードが上書きされるため、
+  // 「コピー → 貼り付け」を 1 段ずつ挟む並びにしている
+  const stepButtons = [btnCopyImage, btnOpenGemini, btnCopyPrompt];
+  const stepDone = [false, false, false];
+  function renderSteps() {
+    const nextIndex = stepDone.indexOf(false);
+    stepButtons.forEach((btn, i) => {
+      btn.classList.toggle("done", stepDone[i]);
+      btn.classList.toggle("next", i === nextIndex && !btn.disabled);
+    });
+  }
+  const completeStep = (i) => { stepDone[i] = true; renderSteps(); };
 
   document.getElementById("open-options").addEventListener("click", () => {
     chrome.runtime.openOptionsPage();
@@ -112,7 +132,10 @@
     overlayCanvas.classList.toggle("visible", debugToggle.checked);
     btnCopyDecisions.hidden = !debugToggle.checked;
     overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-    if (!debugToggle.checked) return;
+    if (!debugToggle.checked) {
+      debugLegend.replaceChildren(); // OFF にしたら凡例も消す
+      return;
+    }
     overlayCtx.lineWidth = 2;
     overlayCtx.setLineDash([]);
     for (const m of masks) {
@@ -129,8 +152,12 @@
     renderLegend();
   }
 
-  const { [DEBUG_MODE_KEY]: savedDebugMode } = await chrome.storage.local.get(DEBUG_MODE_KEY);
-  debugToggle.checked = Boolean(savedDebugMode);
+  const { [DEBUG_MODE_KEY]: savedDebugMode, [DEBUG_PANEL_KEY]: debugPanelEnabled } =
+    await chrome.storage.local.get([DEBUG_MODE_KEY, DEBUG_PANEL_KEY]);
+  debugBar.hidden = !debugPanelEnabled;
+  // パネル非表示（既定）のときはオーバーレイも常にオフ。保存済みの ON 状態が
+  // 設定オフ後に不可視のまま効き続けるのを防ぐ
+  debugToggle.checked = Boolean(debugPanelEnabled) && Boolean(savedDebugMode);
   debugToggle.addEventListener("change", async () => {
     await chrome.storage.local.set({ [DEBUG_MODE_KEY]: debugToggle.checked });
     renderDebugOverlay();
@@ -299,6 +326,7 @@
   btnCopyImage.disabled = false;
   btnCopyPrompt.disabled = false;
   btnOpenGemini.disabled = false;
+  renderSteps(); // 準備完了時点で ① を「次にやる操作」として強調する
 
   // ④ ワイヤーフレーム出力（Issue #20・確定事項12）。設定でオンのときだけ表示し、
   // DOM 経路限定（OCR 経路は誤読テキストが編集可能ファイルに固定化されるため
@@ -350,6 +378,7 @@
   });
   canvas.addEventListener("pointerup", (ev) => {
     if (!dragStart) return;
+    const masksBefore = masks.length;
     const cur = toImageCoords(ev);
     const moved = Math.hypot(cur.x - dragStart.x, cur.y - dragStart.y);
     if (moved <= DRAG_THRESHOLD) {
@@ -380,6 +409,12 @@
     dragStart = null;
     dragBulkUnmask = false;
     dragPreview = null;
+    // マスクを編集したら、コピー済みの画像（①）は編集前の古い状態になるため
+    // ① だけステップ未実行に戻す（②③はマスク編集の影響を受けない）
+    if (masks.length !== masksBefore && stepDone[0]) {
+      stepDone[0] = false;
+      renderSteps();
+    }
     render();
     renderDebugOverlay();
     setStatus(`マスク ${masks.length} 件`);
@@ -417,16 +452,20 @@
     render(); // ドラッグプレビュー等を除いた確定状態で出力
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
     await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-    setStatus("マスク済み画像をコピーしました。Gemini の入力欄に貼り付けてください。");
+    completeStep(0);
+    setStatus("マスク済み画像をコピーしました。② で Gemini を開き、入力欄に貼り付けてください。");
+  });
+
+  btnOpenGemini.addEventListener("click", () => {
+    completeStep(1);
+    setStatus("Gemini に画像を貼り付けたら、この画面に戻って ③ でプロンプトをコピーしてください。");
+    chrome.tabs.create({ url: "https://gemini.google.com/" });
   });
 
   btnCopyPrompt.addEventListener("click", async () => {
     await navigator.clipboard.writeText(PROMPT_TEMPLATE);
-    setStatus("プロンプトをコピーしました。要望部分を書き換えて使ってください。");
-  });
-
-  btnOpenGemini.addEventListener("click", () => {
-    chrome.tabs.create({ url: "https://gemini.google.com/" });
+    completeStep(2);
+    setStatus("プロンプトをコピーしました。Gemini に貼り付け、要望部分を書き換えて送信してください。");
   });
 
   // アイコン領域（Issue #23）をマスク済みキャンバスから切り抜く。切り抜き元は
