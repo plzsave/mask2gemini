@@ -67,6 +67,8 @@ zip を渡した先では、展開して `chrome://extensions`（デベロッパ
 
 zip には非エンジニア向けの利用ガイド [GUIDE.html](./GUIDE.html)（インストール・使い方・ホワイトリスト・更新手順）を同梱している。スクリーンショットは `node scripts/capture-guide-shots.mjs` で再生成できる（UI を変更したら撮り直す）。
 
+**更新の届け方（Issue #33 で確定した運用）**: 新版の告知は配布者が行う（リリースのたびに社内チャット等でアナウンスし、[GitHub Releases](https://github.com/plzsave/mask2gemini/releases) の zip を案内する）。特に recall 修正のリリース（CLAUDE.md のトリガー1）は、告知までがリリース作業の一部。利用者側は設定画面下部でいま使っている版を確認できる。
+
 ## 検証プロセス
 
 判定ロジック（rules.js / allowlist.js / mask-decider.js）を変更したら、次の順で確認する。

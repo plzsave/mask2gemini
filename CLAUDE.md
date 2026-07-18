@@ -53,6 +53,8 @@ zip ビルドと Release 作成は GitHub Actions（`.github/workflows/release.y
      v99.0.0 検証で実際に発生）
 6. Release ワークフローを `gh run watch` で完走まで確認し、
    `gh release view vX.Y.Z` で zip が添付されたことを確認して報告する。
+   報告の際、**利用者への告知（社内チャット等）を促す**（Issue #33 の運用:
+   新版の告知は配布者が行う。特に recall 修正は告知までがリリースの一部）。
    失敗したら原因を修正し、タグを切り直す
    （`git tag -d vX.Y.Z && git push origin --delete vX.Y.Z` → 再タグ）。
    ワークフロー側が使えない事情がある場合のみ、旧手順

@@ -452,6 +452,16 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     expect(await canvasDataUrl()).toBe(beforeDebug);
   });
 
+  // Issue #33: zip 手動配布で自動更新が無いため、利用者が「いま使っている版」を
+  // 確認できる表示を設定画面に置く。manifest の version と一致すること
+  test("options.html: manifest のバージョンが表示される", async ({ context, extensionId }) => {
+    const { version } = JSON.parse(
+      fs.readFileSync(path.join(EXTENSION_PATH, "manifest.json"), "utf8"));
+    const page = await context.newPage();
+    await page.goto(`chrome-extension://${extensionId}/options.html`);
+    await expect(page.locator("#version")).toHaveText(`mask2gemini v${version}`);
+  });
+
   // Issue #34: 撮影失敗時、生の例外文字列ではなく非エンジニア向けの
   // 日本語メッセージがステータスに出ること
   test("review.html: 撮影エラーが非エンジニア向けの文言に変換される", async ({ context, extensionId }) => {
