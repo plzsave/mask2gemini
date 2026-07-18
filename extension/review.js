@@ -380,6 +380,31 @@
   const rectsOverlap = (a, b) =>
     a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
+  // Alt+クリックの列一括解除用（Issue #16 論点1・案b）。テーブルの同一カラムの
+  // セルは x 範囲がほぼ揃うことを利用する。「氏名」セルの「姓」「名」のように
+  // 同列でもトークン間で x が重ならないマスクがあるため、直接の重なりではなく
+  // 重なりの推移的クラスタで列を求める（行ごとの幅広マスクが橋渡しになる）。
+  // y は問わない（列全体）。表以外で偶然 x が揃ったマスクも解除されるが、
+  // 手動起動の操作なので目視確認の範囲内（不足ならドラッグで塗り直せる）
+  const xOverlaps = (a, b) => {
+    const overlap = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+    return overlap > 0 && overlap >= 0.5 * Math.min(a.w, b.w);
+  };
+  function collectColumn(seed) {
+    const column = new Set([seed]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const o of masks) {
+        if (column.has(o)) continue;
+        for (const c of column) {
+          if (xOverlaps(o, c)) { column.add(o); grew = true; break; }
+        }
+      }
+    }
+    return column;
+  }
+
   let dragStart = null;
   let dragBulkUnmask = false;
   canvas.addEventListener("pointerdown", (ev) => {
@@ -405,14 +430,24 @@
     const cur = toImageCoords(ev);
     const moved = Math.hypot(cur.x - dragStart.x, cur.y - dragStart.y);
     if (moved <= DRAG_THRESHOLD) {
-      // クリック: 一番手前（後に追加した）マスクを解除
+      // クリック: 一番手前（後に追加した）マスクを解除。
+      // Alt+クリックは同じ列（x 範囲が揃うマスク）をまとめて解除（Issue #16 論点1・案b。
+      // 表の「ステータス」「更新日時」等、非機密の列を 1 クリックで空ける。
+      // Shift+ドラッグ同様、ホワイトリスト登録の提示は行わない）
       for (let i = masks.length - 1; i >= 0; i--) {
         const m = masks[i];
         if (cur.x >= m.x && cur.x <= m.x + m.w && cur.y >= m.y && cur.y <= m.y + m.h) {
-          masks.splice(i, 1);
-          if (m.source === "auto" && m.text) {
-            revealedMasks.push(m); // ワイヤーフレーム出力ではテキストとして残す
-            offerAllowlistRegistration(m.text);
+          if (ev.altKey) {
+            const column = collectColumn(m);
+            revealedMasks.push(...masks.filter((o) => column.has(o) && o.source === "auto" && o.text));
+            masks = masks.filter((o) => !column.has(o));
+            registerZone.replaceChildren();
+          } else {
+            masks.splice(i, 1);
+            if (m.source === "auto" && m.text) {
+              revealedMasks.push(m); // ワイヤーフレーム出力ではテキストとして残す
+              offerAllowlistRegistration(m.text);
+            }
           }
           break;
         }
