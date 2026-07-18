@@ -285,8 +285,10 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     expect(statusText).toContain("ページ構造を解析");
     expect(checks.length).toBeGreaterThan(0);
     assertChecks(checks, "fixtures/dashboard.html (DOM)");
-    // ワイヤーフレーム出力（Issue #20）は既定オフ: ④ボタンは表示されない
+    // ワイヤーフレーム出力（Issue #20）は既定オフ: ボタンは表示されない
     await expect(reviewPage.locator("#save-wireframe")).toBeHidden();
+    // デバッグ表示（Issue #29）も既定オフ: .debug-bar は表示されない
+    await expect(reviewPage.locator("#debug-bar")).toBeHidden();
   });
 
   test("ワイヤーフレーム出力（Issue #20）: 設定オンで .excalidraw が保存でき、マスク文字列を含まない", async ({ context, extensionId }) => {
@@ -426,6 +428,8 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     if (!sw) sw = await context.waitForEvent("serviceworker");
     await sw.evaluate(async (url) => {
       await chrome.storage.session.set({ capture: { dataUrl: url } });
+      // デバッグ表示 UI は設定オプトイン制（Issue #29）。options.js と同じキー
+      await chrome.storage.local.set({ debugPanelEnabled: true });
     }, dataUrl);
 
     const reviewPage = await context.newPage();
@@ -444,5 +448,40 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     await reviewPage.locator("#debug-toggle").uncheck();
     await expect(reviewPage.locator("#debug-overlay")).not.toHaveClass(/visible/);
     expect(await canvasDataUrl()).toBe(beforeDebug);
+  });
+
+  // Issue #29 案B: 主導線（①→②→③）のステップ進行表示。
+  // 実行済みは .done、次にやる操作は .next で 1 つだけ強調され、
+  // マスクを編集し直すと ①（コピー済み画像が古くなる）だけ未実行に戻る
+  test("review.html: ステップ進行表示（実行で✓、マスク編集で①が戻る）", async ({ context, extensionId }) => {
+    const { reviewPage } = await captureAndReview(
+      context, extensionId, "fixtures/dashboard.html", { domPath: true });
+    const step1 = reviewPage.locator("#copy-image");
+    const step2 = reviewPage.locator("#copy-prompt");
+    const step3 = reviewPage.locator("#open-gemini");
+
+    // 初期状態: ① だけが「次にやる操作」
+    await expect(step1).toHaveClass(/next/);
+    await expect(step2).not.toHaveClass(/next/);
+
+    // ① 実行 → ✓ が付き、強調は ② へ移る
+    await step1.click();
+    await expect(step1).toHaveClass(/done/);
+    await expect(step2).toHaveClass(/next/);
+
+    // ② 実行 → 強調は ③ へ
+    await step2.click();
+    await expect(step2).toHaveClass(/done/);
+    await expect(step3).toHaveClass(/next/);
+
+    // マスクをドラッグ追加 → コピー済み画像（①）が古くなるので ① だけ未実行に戻る
+    const canvasBox = await reviewPage.locator("#canvas").boundingBox();
+    await reviewPage.mouse.move(canvasBox.x + 50, canvasBox.y + 50);
+    await reviewPage.mouse.down();
+    await reviewPage.mouse.move(canvasBox.x + 150, canvasBox.y + 90, { steps: 5 });
+    await reviewPage.mouse.up();
+    await expect(step1).not.toHaveClass(/done/);
+    await expect(step1).toHaveClass(/next/);
+    await expect(step2).toHaveClass(/done/); // ② は影響を受けない
   });
 });

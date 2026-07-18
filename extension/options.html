@@ -37,9 +37,17 @@
     ワイヤーフレーム出力（.excalidraw）を有効にする
   </label>
   <p class="hint">
-    オンにすると、確認画面に「④ ワイヤーフレームを保存」ボタンが表示されます。
+    オンにすると、確認画面に「ワイヤーフレームを保存」ボタンが表示されます。
     マスク済みの画面構造を Excalidraw で編集できる形式で書き出します
     （マスクした文字列はファイルに含まれません。ページ構造を読めた場合のみ利用可）。
+  </p>
+  <label class="toggle-label">
+    <input type="checkbox" id="debug-panel-toggle">
+    デバッグ表示を有効にする
+  </label>
+  <p class="hint">
+    オンにすると、確認画面に「デバッグ表示」チェックボックスが現れます。
+    マスク判定の理由（reason）を枠色で可視化したり、判定ログを JSON でコピーしたりできます。
   </p>
 
   <p id="msg" aria-live="polite"></p>

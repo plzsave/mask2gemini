@@ -63,6 +63,17 @@
     setMsg(`ワイヤーフレーム出力を${wireframeToggle.checked ? "有効" : "無効"}にしました（次回の撮影から反映）`);
   });
 
+  // エンジニア向け: デバッグ表示 UI のオプトイン（Issue #29）。
+  // review.js の DEBUG_PANEL_KEY と同じキーを読み書きする
+  const DEBUG_PANEL_KEY = "debugPanelEnabled";
+  const debugPanelToggle = document.getElementById("debug-panel-toggle");
+  const { [DEBUG_PANEL_KEY]: debugPanelEnabled } = await chrome.storage.local.get(DEBUG_PANEL_KEY);
+  debugPanelToggle.checked = Boolean(debugPanelEnabled);
+  debugPanelToggle.addEventListener("change", async () => {
+    await chrome.storage.local.set({ [DEBUG_PANEL_KEY]: debugPanelToggle.checked });
+    setMsg(`デバッグ表示を${debugPanelToggle.checked ? "有効" : "無効"}にしました（次回の撮影から反映）`);
+  });
+
   document.getElementById("export").addEventListener("click", () => {
     const blob = new Blob(
       [JSON.stringify({ version: 1, terms }, null, 2)],
