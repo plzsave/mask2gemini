@@ -119,6 +119,7 @@ CI では警告（`[soft-ocr]`）に落としてある（`M2G_SOFT_OCR=1`）。*
 - `unknown-ui-labels.html` — 組み込み辞書に無い一般的な UI ラベル語彙
 - `phone-postal-formats.html` — 電話・郵便番号の表記ゆれ（全角・かっこ・国番号等）
 - `noise-borders.html` — 装飾的な罫線・アイコン・低コントラスト文字
+- `english-console.html` — 英語 UI の管理画面。英語圏 PII の recall と英語 UI ラベルの keep（OCR/DOM 両経路）
 - `dashboard.html` — グラフ/統計値を含むダッシュボード画面
 - `admin-console.html` — DOM 経路専用。管理画面の UI 骨格（ナビ・タブ・パンくず等）の過剰マスク検出
 - `opaque-regions.html` — DOM 経路専用。読めない領域（iframe/canvas/img）の丸塗りと要素種別判定
