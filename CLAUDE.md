@@ -44,7 +44,9 @@ zip ビルドと Release 作成は GitHub Actions（`.github/workflows/release.y
 5. リリースノートを本文にした**注釈付きタグ**を作成して push する:
    - subject（1行目）= リリースタイトル（例: `v0.6.1 — 非日本語人名の塗り漏れ修正`）
    - body = ノート本文。体裁は過去リリースに合わせ「変更点 / 既知の課題 /
-     インストール」の 3 節・日本語。recall/セキュリティ修正は冒頭で明示する
+     インストール」の 3 節・日本語。recall/セキュリティ修正は冒頭で明示する。
+     「既知の課題」には OCR フォールバック経路がベストエフォート
+     （誤読による塗り漏れがあり得るため要目視確認）である旨を定型で含める（Issue #35）
    - `git tag -a vX.Y.Z --cleanup=verbatim -F <ノートファイル>` → `git push origin vX.Y.Z`
      （**`--cleanup=verbatim` 必須**: 省略すると git が `#` 始まりの行を
      コメントとして除去し、Markdown 見出し「## 変更点」等がノートから消える。

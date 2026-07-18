@@ -340,7 +340,11 @@
 
   render();
   renderDebugOverlay();
-  setStatus(`自動マスク ${masks.length} 件（${route === "DOM" ? "ページ構造を解析" : "画像から文字認識"}）。目視で確認し、過不足を直してください。`);
+  // OCR 経路はベストエフォート（Issue #35。誤読による塗り漏れがあり得る）なので、
+  // 目視確認を一段強く促す文言にする
+  setStatus(route === "DOM"
+    ? `自動マスク ${masks.length} 件（ページ構造を解析）。目視で確認し、過不足を直してください。`
+    : `自動マスク ${masks.length} 件（画像から文字認識）。認識漏れが起こりやすい方式のため、個人情報が残っていないか特に丁寧に確認してください。`);
 
   btnCopyImage.disabled = false;
   btnCopyPrompt.disabled = false;
