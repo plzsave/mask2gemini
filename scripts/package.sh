@@ -15,7 +15,9 @@ out="$root/dist/mask2gemini-$version.zip"
 
 mkdir -p "$root/dist"
 rm -f "$out"
-(cd "$root" && zip -qr "$out" extension LICENSE)
+# GUIDE.html + guide/ は非エンジニア向けの利用ガイド（Issue #32）。zip の受け取り手が
+# 最初に開くファイルなので必ず同梱する
+(cd "$root" && zip -qr "$out" extension LICENSE GUIDE.html guide)
 
 echo "生成完了: ${out#"$root/"}"
 du -h "$out" | cut -f1
