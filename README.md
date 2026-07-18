@@ -65,6 +65,8 @@ bash scripts/package.sh   # dist/mask2gemini-<version>.zip を生成
 
 zip を渡した先では、展開して `chrome://extensions`（デベロッパーモード）→「パッケージ化されていない拡張機能を読み込む」で `extension/` を選ぶだけ。git・bun は不要。
 
+zip には非エンジニア向けの利用ガイド [GUIDE.html](./GUIDE.html)（インストール・使い方・ホワイトリスト・更新手順）を同梱している。スクリーンショットは `node scripts/capture-guide-shots.mjs` で再生成できる（UI を変更したら撮り直す）。
+
 ## 検証プロセス
 
 判定ロジック（rules.js / allowlist.js / mask-decider.js）を変更したら、次の順で確認する。

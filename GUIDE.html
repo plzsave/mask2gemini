@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mask2gemini 利用ガイド</title>
+<style>
+  body { font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif;
+         line-height: 1.8; color: #202124; max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.6em; border-bottom: 3px solid #3949ab; padding-bottom: 8px; }
+  h2 { font-size: 1.25em; margin-top: 2.2em; border-left: 5px solid #3949ab; padding-left: 10px; }
+  ol li, ul li { margin: 6px 0; }
+  img { max-width: 100%; border: 1px solid #dadce0; border-radius: 6px; margin: 8px 0; }
+  kbd, code { background: #f1f3f4; border-radius: 4px; padding: 1px 6px; font-size: 0.95em; }
+  .note { background: #fef7e0; border-left: 5px solid #f9ab00; padding: 10px 14px; border-radius: 4px; margin: 12px 0; }
+  .warn { background: #fce8e6; border-left: 5px solid #d93025; padding: 10px 14px; border-radius: 4px; margin: 12px 0; }
+  table { border-collapse: collapse; margin: 8px 0; }
+  th, td { border: 1px solid #dadce0; padding: 6px 12px; text-align: left; }
+  th { background: #f1f3f4; }
+</style>
+</head>
+<body>
+
+<h1>mask2gemini 利用ガイド</h1>
+
+<p>mask2gemini は、いま見ている画面を撮影して、<strong>氏名・メールアドレス・電話番号などのデータ部分を自動で黒塗り</strong>にし、Gemini に「この画面の改善モックを作って」と依頼する準備をしてくれる Chrome 拡張機能です。</p>
+<ul>
+  <li>黒塗りの判定はすべてお使いのパソコンの中だけで行われ、<strong>元の画面やテキストが外部に送信されることはありません</strong></li>
+  <li>Gemini に渡るのは、あなたが目で確認して確定した黒塗り済みの画像だけです</li>
+</ul>
+
+<h2>インストール（初回のみ）</h2>
+<ol>
+  <li>受け取った zip ファイルを右クリック →「すべて展開」等で展開する（展開先はどこでも構いませんが、<strong>展開したフォルダは削除せずそのまま残してください</strong>）</li>
+  <li>Chrome のアドレスバーに <code>chrome://extensions</code> と入力して開く</li>
+  <li>右上の「<strong>デベロッパー モード</strong>」をオンにする</li>
+  <li>「<strong>パッケージ化されていない拡張機能を読み込む</strong>」を押し、展開したフォルダの中の <code>extension</code> フォルダを選ぶ</li>
+  <li>ツールバーのパズルピースのアイコンから mask2gemini をピン留めしておくと使いやすくなります</li>
+</ol>
+
+<h2>使い方</h2>
+<ol>
+  <li>マスクしたい画面（社内システムなど）のタブを開いた状態で、ツールバーの <strong>mask2gemini のアイコンをクリック</strong></li>
+  <li>確認画面が新しいタブで開き、データらしい部分に自動で黒塗りが載ります</li>
+</ol>
+<img src="guide/review.png" alt="確認画面。データ部分が黒塗りされ、上部に ①②③ のボタンが並ぶ">
+<ol start="3">
+  <li><strong>黒塗りを目で確認して手直しする</strong>（下の表を参照）。この確認がいちばん大事なステップです</li>
+  <li>上部のボタンを <strong>番号の順に</strong> 押します:
+    「<strong>① マスク済み画像をコピー</strong>」→「<strong>② Gemini を開いて貼り付け</strong>」（開いた Gemini の入力欄に <kbd>Ctrl+V</kbd> で画像を貼る）→ 確認画面のタブに戻って「<strong>③ プロンプトをコピー</strong>」→ Gemini に貼り付けて、要望の部分を書き換えて送信</li>
+</ol>
+
+<h3>黒塗りの手直し</h3>
+<table>
+  <tr><th>やりたいこと</th><th>操作</th></tr>
+  <tr><td>黒塗りを外す（塗りすぎ）</td><td>黒塗りをクリック</td></tr>
+  <tr><td>黒塗りを足す（塗り漏れ）</td><td>塗りたい範囲をドラッグ</td></tr>
+  <tr><td>範囲内の黒塗りをまとめて外す</td><td><kbd>Shift</kbd> を押しながらドラッグ</td></tr>
+</table>
+<div class="warn"><strong>自動の黒塗りは完璧ではありません。</strong>個人情報が残っていないか、必ず目で確認してから ① を押してください。迷ったら塗る方が安全です（塗りすぎても Gemini のモック作成にはほぼ影響しません）。</div>
+
+<h2>いつも黒塗りされてしまう語句があるとき（ホワイトリスト）</h2>
+<p>自社名やサービス名など「隠す必要がないのに毎回塗られる語句」は、設定画面に登録すると次回から塗られなくなります。設定画面は、確認画面右上の「設定」から開けます。</p>
+<img src="guide/options.png" alt="設定画面。マスクしない語句の一覧と JSON エクスポート/インポートのボタン">
+<ul>
+  <li>確認画面で黒塗りをクリックして外したときに出る「次回からマスクしない」ボタンからも、その場で登録できます</li>
+  <li>空白は無視して照合されます（「山田 太郎」を登録すると「山田太郎」も塗られなくなります）</li>
+</ul>
+<p><strong>チームでの共有:</strong> 設定画面の「JSON をエクスポート」で書き出したファイルをチームの共有場所に置き、各メンバーが「JSON をインポート」で取り込むと、登録語句をそろえられます（既存の登録に追記されます）。</p>
+
+<h2>更新のしかた</h2>
+<ol>
+  <li>新しい zip を受け取ったら展開し、いま使っているフォルダと<strong>置き換え</strong>る（同じ場所に上書き展開でも OK）</li>
+  <li><code>chrome://extensions</code> を開き、mask2gemini の「<strong>再読み込み</strong>」（丸い矢印）を押す</li>
+</ol>
+<div class="note">別の場所に展開した場合は、いったん「削除」してから「パッケージ化されていない拡張機能を読み込む」で新しいフォルダを選び直してください。登録したホワイトリストは Chrome 側に保存されているので消えません。</div>
+
+<h2>知っておいてほしいこと</h2>
+<ul>
+  <li><strong>撮影されるのは画面に見えている範囲だけ</strong>です。スクロールしないと見えない部分も渡したいときは、スクロールしてもう一度アイコンを押し、複数枚に分けてください</li>
+  <li>Chrome の設定画面（<code>chrome://〜</code>）やウェブストアなど、撮影できないページもあります。その場合は画面にその旨が表示されます</li>
+  <li>PDF など一部のページでは文字の読み取り方式が変わり（画像からの文字認識）、精度が少し落ちます。黒塗りの確認をより丁寧に行ってください</li>
+</ul>
+
+</body>
+</html>
