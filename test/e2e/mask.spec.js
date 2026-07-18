@@ -467,6 +467,44 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     expect(await canvasDataUrl()).toBe(beforeDebug);
   });
 
+  // Issue #16 論点1（案b）: Alt+クリックで同じ列のマスクを一括解除する。
+  // 判定は td 全塗りのまま変えない（recall 不変・確定事項2）ため、
+  // 解除操作の UI だけを検証する
+  test("review.html: Alt+クリックで同じ列のマスクだけが一括解除される", async ({ context, extensionId }) => {
+    const { checks, reviewPage } = await captureAndReview(
+      context, extensionId, "fixtures/english-console.html", { domPath: true });
+
+    const nameCells = checks.filter((c) => ["John Smith", "Michael O'Brien", "Ana Lee"].includes(c.text));
+    const emailCells = checks.filter((c) => c.text.includes("@") && c.check === "mask");
+    expect(nameCells.length).toBe(3);
+    expect(emailCells.length).toBeGreaterThan(0);
+
+    // canvas は CSS で縮小表示され得るため、画像 px → 画面 px の係数を実測する
+    const box = await reviewPage.locator("#canvas").boundingBox();
+    const scale = box.width / await reviewPage.evaluate(() => document.getElementById("canvas").width);
+    const target = nameCells[0];
+    // mouse.click に modifiers オプションは無い（黙って無視される）ため、
+    // keyboard.down で Alt を押しっぱなしにして挟む
+    await reviewPage.keyboard.down("Alt");
+    await reviewPage.mouse.click(
+      box.x + (target.x + target.w / 2) * scale,
+      box.y + (target.y + target.h / 2) * scale);
+    await reviewPage.keyboard.up("Alt");
+
+    const after = await reviewPage.evaluate(sampleCanvasRects, { rects: checks });
+    checks.forEach((c, i) => {
+      if (nameCells.includes(c)) {
+        // 氏名列: 3 セルすべて解除され、元の明るさに戻る
+        expect(Math.abs(after[i] - c.orig), `氏名列「${c.text}」は解除されるべき`)
+          .toBeLessThan(KEEP_MAX_BRIGHTNESS_DELTA);
+      } else if (emailCells.includes(c)) {
+        // 隣のメール列は塗られたまま
+        expect(after[i], `メール列「${c.text}」は塗られたままのべき`)
+          .toBeLessThan(MASKED_MAX_BRIGHTNESS);
+      }
+    });
+  });
+
   // Issue #33: zip 手動配布で自動更新が無いため、利用者が「いま使っている版」を
   // 確認できる表示を設定画面に置く。manifest の version と一致すること
   test("options.html: manifest のバージョンが表示される", async ({ context, extensionId }) => {
