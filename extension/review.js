@@ -61,11 +61,30 @@
     chrome.runtime.openOptionsPage();
   });
 
+  // 撮影失敗時の生エラー（background.js が String(e) で保存）を、非エンジニアが
+  // 次に何をすればよいか分かる日本語に変換する（Issue #34）。判別できない
+  // エラーは null を返し、呼び出し側で汎用メッセージに落とす
+  function friendlyCaptureError(raw) {
+    const s = String(raw ?? "");
+    if (s.includes("MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND")) {
+      return "撮影の間隔が短すぎます。数秒待ってから、もう一度拡張アイコンを押してください。";
+    }
+    if (/activeTab|permission|cannot access|cannot be scripted|chrome:\/\//i.test(s)) {
+      return "このページは撮影できません（Chrome の設定画面・ウェブストアなど）。マスクしたい画面のタブで拡張アイコンを押してください。";
+    }
+    if (/quota/i.test(s)) {
+      return "撮影した画像が大きすぎて保存できませんでした。ブラウザのウィンドウを小さくしてから撮り直してください。";
+    }
+    return null;
+  }
+
   // ---- 撮影データの取得 ----
   const { capture, captureError, domExtract, domExtractError } =
     await chrome.storage.session.get(["capture", "captureError", "domExtract", "domExtractError"]);
   if (!capture) {
-    setStatus(`撮影データがありません。対象タブで拡張アイコンを押し直してください。${captureError ? ` (${captureError})` : ""}`);
+    if (captureError) console.debug("[mask2gemini] 撮影エラー:", captureError);
+    setStatus(friendlyCaptureError(captureError)
+      ?? "撮影データがありません。対象タブで拡張アイコンを押し直してください。");
     return;
   }
 
@@ -521,6 +540,7 @@
     setStatus("判定ログ（JSON）をコピーしました。※マスク前のテキストを含みます");
   });
 })().catch((e) => {
-  document.getElementById("status").textContent = `エラー: ${e?.message ?? e}`;
+  document.getElementById("status").textContent =
+    "処理中にエラーが発生しました。対象タブで拡張アイコンを押して撮り直してください。";
   console.error(e);
 });
