@@ -12,6 +12,7 @@
 // 抽出由来の全要素に customData.m2g を刻む（Excalidraw 公式サポートの
 // 任意メタデータ。レンダリング・編集に影響せず保存される）。cc-sdd 等で
 // LLM が JSON を読む際に「何の枠か」を機械可読にするため。
+// - v: スキーマバージョン（Issue #49）。読み方の規約とあわせて docs/m2g-schema.md 参照
 // - role: "masked"（+ reason=判定種別。文字列そのものではないので漏えいなし）
 //         / "text"（残存 UI テキスト） / "revealed"（確認画面で解除された語）
 //         / "decor"（装飾） / "icon"（+ kind）
@@ -23,6 +24,11 @@
 //   コピーするため、既存のデータ枠を複製して増やす編集なら意味も追従する）
 (() => {
   "use strict";
+
+  // m2g メタデータのスキーマバージョン（Issue #49）。読み方の規約は
+  // docs/m2g-schema.md（配布 zip に同梱）に定める。語彙の追加だけなら
+  // 上げない。既存フィールドの意味変更・非互換の変更をしたときのみ上げる
+  const M2G_SCHEMA_VERSION = 1;
 
   // マスク矩形の塗り。黒塗りではなくハッチにするのは「ここに何か入る」という
   // ワイヤーフレームの記法に寄せるため（中身が読めない点は黒塗りと同じ）
@@ -95,6 +101,8 @@
   function buildWireframe({ masks, kept, revealed = [], decor = [], icons = [], scale = 1 }) {
     let n = 0;
     const nextId = (prefix) => `m2g-${prefix}-${(n++).toString(36).padStart(4, "0")}`;
+    // すべての m2g にスキーマバージョン v を先頭で刻む（Issue #49）
+    const meta = (m2g) => ({ m2g: { v: M2G_SCHEMA_VERSION, ...m2g } });
     const groupIds = (blockId) => (blockId === undefined ? [] : [`block-${blockId}`]);
     const elements = [];
 
@@ -107,7 +115,7 @@
         backgroundColor: d.bg ? d.color : "transparent",
         strokeColor: d.border ? d.color : "transparent",
         strokeWidth: 1, roughness: 1, groupIds: [],
-        customData: { m2g: { role: "decor" } },
+        customData: meta({ role: "decor" }),
       });
     }
 
@@ -126,7 +134,7 @@
         x: round(ic.x), y: round(ic.y), width: round(ic.w), height: round(ic.h),
         fileId, status: "saved", scale: [1, 1],
         strokeColor: "transparent", groupIds: [],
-        customData: { m2g: { role: "icon", kind: ic.kind } },
+        customData: meta({ role: "icon", kind: ic.kind }),
       });
     }
 
@@ -149,7 +157,7 @@
         fontSize: Math.max(MIN_FONT_SIZE, Math.round(h / LINE_HEIGHT)),
         textAlign: "left", verticalAlign: "top",
         strokeColor: "#1e1e1e", groupIds: groupIds(t.blockId),
-        customData: { m2g: t.m2g },
+        customData: meta(t.m2g),
       });
     }
 
@@ -164,7 +172,7 @@
         // reason は判定種別（digit-run / proper-noun / dom-data 等）であって
         // マスクした文字列ではない。kind（td/input:email 等）と合わせて
         // 「何のダミーを入れる枠か」を LLM に伝える
-        customData: { m2g: withKind({ role: "masked", reason: m.reason ?? "manual" }, m.kind) },
+        customData: meta(withKind({ role: "masked", reason: m.reason ?? "manual" }, m.kind)),
       });
     }
 

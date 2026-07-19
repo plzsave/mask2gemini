@@ -160,9 +160,9 @@ test("customData: kind（要素種別）が text/masked/revealed に透過され
     revealed: [{ x: 0, y: 40, w: 60, h: 20, reason: "dom-data", text: "有効", source: "auto", kind: "td" }],
   });
   const masked = file.elements.find((e) => e.customData.m2g.role === "masked");
-  assert.deepEqual(masked.customData.m2g, { role: "masked", reason: "dom-data", kind: "td" });
+  assert.deepEqual(masked.customData.m2g, { v: 1, role: "masked", reason: "dom-data", kind: "td" });
   const text = file.elements.find((e) => e.customData.m2g.role === "text");
-  assert.deepEqual(text.customData.m2g, { role: "text", kind: "th" });
+  assert.deepEqual(text.customData.m2g, { v: 1, role: "text", kind: "th" });
   const revealed = file.elements.find((e) => e.customData.m2g.role === "revealed");
   assert.equal(revealed.customData.m2g.kind, "td");
 });
@@ -198,7 +198,23 @@ test("customData: 手動マスク（reason 無し）は reason=manual になる"
     masks: [{ x: 0, y: 0, w: 40, h: 20, source: "manual" }],
     kept: [],
   });
-  assert.deepEqual(file.elements[0].customData.m2g, { role: "masked", reason: "manual" });
+  assert.deepEqual(file.elements[0].customData.m2g, { v: 1, role: "masked", reason: "manual" });
+});
+
+// ---- Issue #49: スキーマバージョン ----
+
+test("customData: 全 m2g にスキーマバージョン v が刻まれる（docs/m2g-schema.md）", () => {
+  const file = buildWireframe({
+    masks: [{ x: 0, y: 0, w: 60, h: 20, reason: "digit-run", text: "090-1234" }],
+    kept: [keptUnit("担当", 100)],
+    revealed: [{ x: 0, y: 40, w: 60, h: 20, reason: "proper-noun", text: "株式会社ABC", source: "auto" }],
+    decor: [{ x: 0, y: 0, w: 10, h: 10, bg: true, border: false, color: "rgb(1,2,3)" }],
+    icons: [{ x: 10, y: 20, w: 16, h: 16, kind: "svg", dataURL: "data:image/png;base64,AAAA" }],
+  });
+  assert.ok(file.elements.length >= 5, "全 role が揃っていること");
+  for (const e of file.elements) {
+    assert.equal(e.customData.m2g.v, 1, `${e.customData.m2g.role} に v が刻まれること`);
+  }
 });
 
 // ---- Issue #23: アイコンの切り抜き埋め込み ----
@@ -215,7 +231,7 @@ test("buildWireframe: アイコンは image 要素 + files として埋め込ま
   assert.deepEqual([img.x, img.y, img.width, img.height], [10, 20, 16, 16]);
   assert.equal(img.status, "saved");
   assert.deepEqual(img.scale, [1, 1]);
-  assert.deepEqual(img.customData.m2g, { role: "icon", kind: "svg" });
+  assert.deepEqual(img.customData.m2g, { v: 1, role: "icon", kind: "svg" });
   const entry = file.files[img.fileId];
   assert.ok(entry, "fileId が files のキーとして解決できること");
   assert.equal(entry.id, img.fileId);
