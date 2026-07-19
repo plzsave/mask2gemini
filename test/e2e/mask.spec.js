@@ -378,6 +378,11 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     const maskedRoles = file.elements.filter((e) => e.customData.m2g.role === "masked");
     expect(maskedRoles.length).toBeGreaterThan(0);
     expect(maskedRoles.every((e) => typeof e.customData.m2g.reason === "string")).toBe(true);
+    // Issue #48: 要素種別（kind）が透過される。dashboard のテーブルヘッダは
+    // kind=th のテキスト、データセルは kind=td のマスク矩形になる
+    expect(file.elements.some((e) =>
+      e.customData.m2g.role === "text" && e.customData.m2g.kind === "th")).toBe(true);
+    expect(maskedRoles.some((e) => e.customData.m2g.kind === "td")).toBe(true);
   });
 
   test("fixtures/pseudo-table.html（DOM経路）: role付き div 疑似テーブルのセルがデータとして塗られる（Issue #16）", async ({ context, extensionId }) => {

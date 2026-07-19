@@ -6,13 +6,16 @@
   // 1 行分の抽出結果（OCR line または dom-extractor.js の互換 line）を
   // 判定単位の列に変換する。tokenizer があれば行テキストを形態素解析し、
   // 文字 (symbol) の bbox からトークン単位の矩形を組み立てる。
-  // 無ければ単語単位のまま返す。DOM 経路は line.semantic（"label"|"data"|null）を
+  // 無ければ単語単位のまま返す。DOM 経路は line.semantic（"label"|"data"|null）と
+  // line.kind（semantic を決めた要素種別。th/td/nav/input:text 等。Issue #48）を
   // 持ち、各 unit にそのまま引き継ぐ（OCR 経路では undefined → null）。
+  // kind は判定に使わず、ワイヤーフレーム出力の customData.m2g へ透過するだけ
   function lineToUnits(line, tokenizer) {
     const semantic = line.semantic ?? null;
+    const kind = line.kind ?? null;
     if (!tokenizer) {
       return line.words.map((w) => ({
-        text: w.text, bbox: w.bbox, token: null, confidence: w.confidence, semantic,
+        text: w.text, bbox: w.bbox, token: null, confidence: w.confidence, semantic, kind,
       }));
     }
     // 信頼度は word のものを使う（枠線等のノイズは word confidence が 0 になる。
@@ -22,7 +25,7 @@
     const lineText = symbols.map((s) => s.text).join("");
     if (lineText.length === 0) {
       return line.words.map((w) => ({
-        text: w.text, bbox: w.bbox, token: null, confidence: w.confidence, semantic,
+        text: w.text, bbox: w.bbox, token: null, confidence: w.confidence, semantic, kind,
       }));
     }
     // 行テキストの文字位置 → symbol index の対応表（symbol が複数文字の場合に備える）
@@ -40,6 +43,7 @@
         text: token.surface_form,
         token,
         semantic,
+        kind,
         confidence: Math.min(...ss.map((s) => s.wordConfidence)),
         bbox: {
           x0: Math.min(...ss.map((s) => s.bbox.x0)),
@@ -138,7 +142,11 @@
           y1: Math.max(last.bbox.y1, unit.bbox.y1),
         };
       } else {
-        runs.push({ start: i, end: i, reason, texts: [unit.text], bbox: { ...unit.bbox } });
+        // kind はラン先頭の unit のものを使う（同一行の連続一致なので実質同一要素）
+        runs.push({
+          start: i, end: i, reason, texts: [unit.text],
+          bbox: { ...unit.bbox }, kind: unit.kind ?? null,
+        });
       }
     };
     units.forEach((unit, i) => {
@@ -147,7 +155,7 @@
       const decide = (verdict, reason) => {
         decisions.push(`${unit.text}=${verdict}`);
         if (reason !== undefined) {
-          kept.push({ ...toRect(unit.bbox, 0), reason, text: unit.text });
+          kept.push({ ...toRect(unit.bbox, 0), reason, text: unit.text, kind: unit.kind ?? null });
         }
       };
       if (userProtected.has(i)) return decide("残:user", "user"); // ユーザー登録は無条件で勝つ
@@ -169,7 +177,10 @@
         // 文字列がデータとして入っているケース等を落とさない）
         if (unit.semantic === "data") {
           decide("塗:dom-data");
-          masks.push({ ...toRect(unit.bbox, maskPadding), source: "auto", reason: "dom-data", text: unit.text });
+          masks.push({
+            ...toRect(unit.bbox, maskPadding), source: "auto", reason: "dom-data",
+            text: unit.text, kind: unit.kind ?? null,
+          });
           return;
         }
         // 漢字名ラン（Issue #10）。テキスト判定が「残す」でも、人名らしき連結の
@@ -207,12 +218,15 @@
         addToRun(i, unit, reason);
         return;
       }
-      masks.push({ ...toRect(unit.bbox, maskPadding), source: "auto", reason, text: unit.text });
+      masks.push({
+        ...toRect(unit.bbox, maskPadding), source: "auto", reason,
+        text: unit.text, kind: unit.kind ?? null,
+      });
     });
     for (const run of runs) {
       masks.push({
         ...toRect(run.bbox, maskPadding), source: "auto", reason: run.reason,
-        text: run.texts.join(""),
+        text: run.texts.join(""), kind: run.kind,
       });
     }
     return { masks, kept, decisions };

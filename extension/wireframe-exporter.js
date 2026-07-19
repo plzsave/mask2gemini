@@ -15,6 +15,9 @@
 // - role: "masked"（+ reason=判定種別。文字列そのものではないので漏えいなし）
 //         / "text"（残存 UI テキスト） / "revealed"（確認画面で解除された語）
 //         / "decor"（装飾） / "icon"（+ kind）
+// - kind: DOM の要素種別（th/td/label/nav/h1/button/input:text 等。Issue #48）。
+//         dom-extractor が semantic 判定時に見た種別の透過で、取れたときだけ載る。
+//         タグ名・type 属性であって内容ではないため漏えい面は増えない
 // - customData が**無い**要素 = エンジニアが Excalidraw で後から追加した提案部分、
 //   という読み分けを README に定めている（Excalidraw の複製操作は customData ごと
 //   コピーするため、既存のデータ枠を複製して増やす編集なら意味も追従する）
@@ -56,6 +59,9 @@
         && vOverlap > lineH * 0.5 && gap <= lineH * MERGE_GAP_RATIO) {
         if (gap >= lineH * SPACE_GAP_RATIO) last.text += " ";
         last.text += k.text;
+        // 要素種別（kind。Issue #48）はマージ範囲で一致する場合のみ残す
+        // （同一ブロック内で th と平文が混ざる等、確信が持てなければ出さない）
+        if (last.kind !== k.kind) last.kind = null;
         const x1 = Math.max(last.x + last.w, k.x + k.w);
         const y1 = Math.max(last.y + last.h, k.y + k.h);
         last.x = Math.min(last.x, k.x);
@@ -126,10 +132,13 @@
 
     // テキスト（残存 + 解除済みマスク）。解除済みはマージ対象にしない
     // （マスク矩形単位ですでにまとまっているため）
+    // kind（DOM の要素種別。th/td/nav/input:text 等。Issue #48）は取れたときだけ
+    // m2g に載せる（OCR 由来や種別なしの平文には無い）
+    const withKind = (m2g, kind) => (kind ? { ...m2g, kind } : m2g);
     const textItems = [
-      ...mergeTextRuns(kept).map((t) => ({ ...t, m2g: { role: "text" } })),
+      ...mergeTextRuns(kept).map((t) => ({ ...t, m2g: withKind({ role: "text" }, t.kind) })),
       ...revealed.filter((m) => m.text)
-        .map((m) => ({ ...m, m2g: { role: "revealed", reason: m.reason } })),
+        .map((m) => ({ ...m, m2g: withKind({ role: "revealed", reason: m.reason }, m.kind) })),
     ];
     for (const t of textItems) {
       const x = t.x / scale, y = t.y / scale, w = t.w / scale, h = t.h / scale;
@@ -153,8 +162,9 @@
         width: round(m.w / scale), height: round(m.h / scale),
         ...fill, strokeWidth: 1, roughness: 1, groupIds: groupIds(m.blockId),
         // reason は判定種別（digit-run / proper-noun / dom-data 等）であって
-        // マスクした文字列ではない。「何のダミーを入れる枠か」を LLM に伝える
-        customData: { m2g: { role: "masked", reason: m.reason ?? "manual" } },
+        // マスクした文字列ではない。kind（td/input:email 等）と合わせて
+        // 「何のダミーを入れる枠か」を LLM に伝える
+        customData: { m2g: withKind({ role: "masked", reason: m.reason ?? "manual" }, m.kind) },
       });
     }
 

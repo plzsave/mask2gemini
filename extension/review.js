@@ -263,6 +263,7 @@
       for (const [blockId, blockLines] of byBlock) {
         const units = blockLines.flatMap((line) => lineToUnits({
           semantic: line.semantic,
+          kind: line.kind,
           words: line.words.map((w) => ({
             text: w.text, confidence: w.confidence,
             bbox: scaleBbox(w.bbox),

@@ -51,6 +51,43 @@ test("lineToUnits: OCR 経路（semantic 無し）の unit は semantic=null に
   assert.equal(lineToUnits(line, null)[0].semantic, null);
 });
 
+// ---- Issue #48: 要素種別（kind）の透過 ----
+
+test("lineToUnits: line.kind は各 unit に引き継がれる（無ければ null）", () => {
+  const line = {
+    semantic: "data", kind: "td",
+    words: [{ text: "山田太郎", bbox: { x0: 0, y0: 0, x1: 40, y1: 10 }, confidence: 100 }],
+  };
+  assert.equal(lineToUnits(line, null)[0].kind, "td");
+  const ocrLine = { words: [{ text: "保存", bbox: { x0: 0, y0: 0, x1: 10, y1: 10 }, confidence: 90 }] };
+  assert.equal(lineToUnits(ocrLine, null)[0].kind, null);
+});
+
+test("decideParagraphMasks: unit.kind は masks / kept に透過される（判定には影響しない）", () => {
+  const units = [
+    { ...unit("保存"), semantic: "data", kind: "td" },
+    { ...unit("氏名", { x0: 20 }), semantic: "label", kind: "th" },
+  ];
+  const { masks, kept } = decideParagraphMasks(units, baseDeps());
+  assert.equal(masks.length, 1);
+  assert.equal(masks[0].kind, "td");
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].kind, "th");
+});
+
+test("decideParagraphMasks: 行結合ラン（digit-run 等）のマスクにも kind が付く", () => {
+  const units = [
+    { ...unit("090", { x0: 0 }), semantic: "data", kind: "input:tel" },
+    { ...unit("-", { x0: 20 }), semantic: "data", kind: "input:tel" },
+    { ...unit("1234", { x0: 40 }), semantic: "data", kind: "input:tel" },
+    { ...unit("-", { x0: 60 }), semantic: "data", kind: "input:tel" },
+    { ...unit("5678", { x0: 80 }), semantic: "data", kind: "input:tel" },
+  ];
+  const { masks } = decideParagraphMasks(units, baseDeps());
+  assert.ok(masks.length >= 1);
+  for (const m of masks) assert.equal(m.kind, "input:tel");
+});
+
 // ---- 確定事項11: DOM 要素種別レベルの構造判定 ----
 
 test("decideParagraphMasks: semantic=data はテキスト判定が「残す」でも塗る（td 内の UI ラベル語等）", () => {
