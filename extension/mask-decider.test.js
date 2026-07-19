@@ -75,6 +75,23 @@ test("decideParagraphMasks: unit.kind は masks / kept に透過される（判�
   assert.equal(kept[0].kind, "th");
 });
 
+test("decideParagraphMasks: tableId/col は masks / kept に透過される（Issue #50）", () => {
+  const units = [
+    { ...unit("保存"), semantic: "data", kind: "td", tableId: 0, col: 2 },
+    { ...unit("氏名", { x0: 20 }), semantic: "label", kind: "th", tableId: 0, col: 2 },
+    { ...unit("Widgetzone", { x0: 40 }), semantic: "label", kind: "nav" }, // テーブル外
+  ];
+  const { masks, kept } = decideParagraphMasks(units, baseDeps());
+  assert.equal(masks[0].tableId, 0);
+  assert.equal(masks[0].col, 2);
+  const header = kept.find((k) => k.text === "氏名");
+  assert.equal(header.tableId, 0);
+  assert.equal(header.col, 2);
+  const outside = kept.find((k) => k.text === "Widgetzone");
+  assert.equal(outside.tableId, null);
+  assert.equal(outside.col, null);
+});
+
 test("decideParagraphMasks: 行結合ラン（digit-run 等）のマスクにも kind が付く", () => {
   const units = [
     { ...unit("090", { x0: 0 }), semantic: "data", kind: "input:tel" },

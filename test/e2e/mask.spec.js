@@ -385,17 +385,34 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     expect(file.elements.some((e) =>
       e.customData.m2g.role === "text" && e.customData.m2g.kind === "th")).toBe(true);
     expect(maskedRoles.some((e) => e.customData.m2g.kind === "td")).toBe(true);
+    // Issue #50: td セルのマスクが tableId/col を持ち、同じ tableId・同じ col の
+    // th ヘッダ text と機械的に結べる
+    const linkedCell = maskedRoles.find((e) =>
+      e.customData.m2g.kind === "td" && e.customData.m2g.tableId !== undefined);
+    expect(linkedCell).toBeTruthy();
+    expect(file.elements.some((e) => e.customData.m2g.role === "text"
+      && e.customData.m2g.kind === "th"
+      && e.customData.m2g.tableId === linkedCell.customData.m2g.tableId
+      && e.customData.m2g.col === linkedCell.customData.m2g.col)).toBe(true);
   });
 
   test("fixtures/pseudo-table.html（DOM経路）: role付き div 疑似テーブルのセルがデータとして塗られる（Issue #16）", async ({ context, extensionId }) => {
     // role="row" 配下のセル（cell role 無し）が td 同等の dom-data 扱いになり、
     // columnheader は残ること。role 無しの素の div グリッドはテキスト面ルールのみ
     // （人名は塗られる）という境界も同じ fixture で検証する
-    const { checks, statusText } = await captureAndReview(
+    const { checks, statusText, domExtract } = await captureAndReview(
       context, extensionId, "fixtures/pseudo-table.html", { domPath: true });
     expect(statusText).toContain("ページ構造を解析");
     expect(checks.length).toBeGreaterThan(0);
     assertChecks(checks, "fixtures/pseudo-table.html (DOM)");
+    // Issue #50: role="row" の疑似テーブルでも列関連付けが収集される。
+    // columnheader「顧客名」（先頭列）と、同じ tableId・col=0 のデータ行セルが結べる
+    const header = domExtract.lines.find((l) => l.words[0].text === "顧客名");
+    expect(header.kind).toBe("columnheader");
+    expect(header.tableId).not.toBeNull();
+    expect(header.col).toBe(0);
+    expect(domExtract.lines.some((l) => l.semantic === "data"
+      && l.tableId === header.tableId && l.col === 0)).toBe(true);
   });
 
   test("ワイヤーフレーム出力（Issue #23）: アイコンがマスク済み画像の切り抜きとして埋め込まれる", async ({ context, extensionId }) => {
