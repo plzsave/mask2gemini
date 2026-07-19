@@ -151,6 +151,48 @@ test("customData: 抽出由来の全要素に m2g メタデータが刻まれる
   assert.equal(revealed.customData.m2g.reason, "proper-noun");
 });
 
+// ---- Issue #48: 要素種別（kind）の透過 ----
+
+test("customData: kind（要素種別）が text/masked/revealed に透過される", () => {
+  const file = buildWireframe({
+    masks: [{ x: 0, y: 0, w: 60, h: 20, reason: "dom-data", text: "岡田", kind: "td" }],
+    kept: [{ ...keptUnit("氏名", 100), kind: "th" }],
+    revealed: [{ x: 0, y: 40, w: 60, h: 20, reason: "dom-data", text: "有効", source: "auto", kind: "td" }],
+  });
+  const masked = file.elements.find((e) => e.customData.m2g.role === "masked");
+  assert.deepEqual(masked.customData.m2g, { role: "masked", reason: "dom-data", kind: "td" });
+  const text = file.elements.find((e) => e.customData.m2g.role === "text");
+  assert.deepEqual(text.customData.m2g, { role: "text", kind: "th" });
+  const revealed = file.elements.find((e) => e.customData.m2g.role === "revealed");
+  assert.equal(revealed.customData.m2g.kind, "td");
+});
+
+test("customData: kind が無い入力（OCR 経路・手動マスク等）では kind フィールド自体を出さない", () => {
+  const file = buildWireframe({
+    masks: [{ x: 0, y: 0, w: 60, h: 20, reason: "digit", text: "0901234" }],
+    kept: [keptUnit("保存", 100)],
+  });
+  for (const e of file.elements) {
+    assert.ok(!("kind" in e.customData.m2g));
+  }
+});
+
+test("mergeTextRuns: kind はマージ範囲で一致する場合のみ残り、混在したら落ちる", () => {
+  const same = mergeTextRuns([
+    { ...keptUnit("氏", 0, { w: 15 }), kind: "th" },
+    { ...keptUnit("名", 16, { w: 15 }), kind: "th" },
+  ]);
+  assert.equal(same.length, 1);
+  assert.equal(same[0].kind, "th");
+
+  const mixed = mergeTextRuns([
+    { ...keptUnit("氏名", 0, { w: 30 }), kind: "th" },
+    { ...keptUnit("補足", 31, { w: 30 }), kind: null },
+  ]);
+  assert.equal(mixed.length, 1);
+  assert.equal(mixed[0].kind, null);
+});
+
 test("customData: 手動マスク（reason 無し）は reason=manual になる", () => {
   const file = buildWireframe({
     masks: [{ x: 0, y: 0, w: 40, h: 20, source: "manual" }],

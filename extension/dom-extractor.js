@@ -8,7 +8,10 @@
 // 返す形:
 //   {
 //     viewport: { w, h },                     // CSS px。review 側で画像pxへの係数を出す
-//     lines: [{ blockId, semantic, words }],  // mask-decider の lineToUnits 互換の行。
+//     lines: [{ blockId, semantic, kind, words }],
+//                                             // mask-decider の lineToUnits 互換の行。
+//                                             // kind は semantic を決めた要素種別
+//                                             // （th/td/nav/input:text 等。Issue #48）。
 //                                             // words は常に 1 要素で、symbols に
 //                                             // 文字単位の bbox を持つ（OCR の symbol 相当）
 //     opaque: [{ x, y, w, h, kind }],         // 中身を読めない領域（丸塗り対象。確定事項10）
@@ -87,13 +90,18 @@
     return root instanceof ShadowRoot ? root.host : null;
   };
 
+  // semantic（label/data。マスク判定に使う 2 値）に加え、判定を決めた要素種別
+  // そのもの（タグ名または role 名）を kind として返す。kind はワイヤーフレーム
+  // 出力の customData.m2g に透過するだけで、マスク判定には使わない（Issue #48）
   const semanticOf = (el) => {
     for (let e = el; e; e = parentOf(e)) {
       const role = e.getAttribute("role");
-      if (LABEL_TAGS.has(e.localName) || (role && LABEL_ROLES.has(role))) return "label";
-      if (DATA_TAGS.has(e.localName) || (role && DATA_ROLES.has(role))) return "data";
+      if (LABEL_TAGS.has(e.localName)) return { semantic: "label", kind: e.localName };
+      if (role && LABEL_ROLES.has(role)) return { semantic: "label", kind: role };
+      if (DATA_TAGS.has(e.localName)) return { semantic: "data", kind: e.localName };
+      if (role && DATA_ROLES.has(role)) return { semantic: "data", kind: role };
     }
-    return null;
+    return { semantic: null, kind: null };
   };
 
   // フレーズ照合（ユーザーホワイトリスト・UIラベル辞書）の結合範囲を決める
@@ -123,7 +131,7 @@
     icons.push({ x: bbox.x0, y: bbox.y0, w, h, kind });
   };
 
-  const pushLine = (blockId, semantic, chars) => {
+  const pushLine = (blockId, semantic, kind, chars) => {
     if (!chars.some((c) => c.ch.trim())) return; // 空白だけの行は捨てる
     const bbox = {
       x0: Math.min(...chars.map((c) => c.bbox.x0)),
@@ -137,7 +145,7 @@
     const text = chars.map((c) => c.ch).join("");
     if (PUA_RUN.test(text) && HAS_PUA.test(text)) return pushIcon(bbox, "glyph");
     lines.push({
-      blockId, semantic,
+      blockId, semantic, kind,
       words: [{
         text: chars.map((c) => c.ch).join(""),
         confidence: 100,
@@ -165,7 +173,7 @@
       chars.push({ ch: node.data[i], bbox });
     }
     if (chars.length === 0) return;
-    const semantic = semanticOf(parent);
+    const { semantic, kind } = semanticOf(parent);
     const blockId = blockIdOf(parent);
     // 折り返しで複数の視覚行にまたがるテキストノードは行ごとに分ける
     // （トークンの bbox union が行間の無関係な領域を巻き込まないように。
@@ -177,12 +185,12 @@
         ? Math.min(last.bbox.y1, c.bbox.y1) - Math.max(last.bbox.y0, c.bbox.y0)
         : 0;
       if (last && overlap < (c.bbox.y1 - c.bbox.y0) * 0.5) {
-        pushLine(blockId, semantic, cur);
+        pushLine(blockId, semantic, kind, cur);
         cur = [];
       }
       cur.push(c);
     }
-    if (cur.length) pushLine(blockId, semantic, cur);
+    if (cur.length) pushLine(blockId, semantic, kind, cur);
   };
 
   // フォーム部品の値はテキストノードにならないため、要素の value を
@@ -210,6 +218,9 @@
       blockId: blockIdOf(el),
       // submit/reset/button の value はボタンのラベル。それ以外はユーザー入力値
       semantic: ["button", "submit", "reset"].includes(type) ? "label" : "data",
+      // フォーム部品の種別。input は type まで区別する（text/email/date/password 等。
+      // モック再現に直結する情報のため。Issue #48）
+      kind: el.localName === "input" ? `input:${type || "text"}` : el.localName,
       words: [{ text, confidence: 100, bbox, symbols: null }],
     });
   };
