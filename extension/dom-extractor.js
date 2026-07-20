@@ -8,10 +8,12 @@
 // 返す形:
 //   {
 //     viewport: { w, h },                     // CSS px。review 側で画像pxへの係数を出す
-//     lines: [{ blockId, semantic, kind, words }],
+//     lines: [{ blockId, semantic, kind, tableId, col, words }],
 //                                             // mask-decider の lineToUnits 互換の行。
 //                                             // kind は semantic を決めた要素種別
 //                                             // （th/td/nav/input:text 等。Issue #48）。
+//                                             // tableId/col はテーブルの列関連付け
+//                                             // （Issue #50。行に属さない要素は null）。
 //                                             // words は常に 1 要素で、symbols に
 //                                             // 文字単位の bbox を持つ（OCR の symbol 相当）
 //     opaque: [{ x, y, w, h, kind }],         // 中身を読めない領域（丸塗り対象。確定事項10）
@@ -104,6 +106,38 @@
     return { semantic: null, kind: null };
   };
 
+  // テーブルの列関連付け（Issue #50）。ヘッダ（th/columnheader）とセルのマスクを
+  // 「同じ tableId・同じ col」で機械的に結べるようにする、ワイヤーフレーム出力
+  // 専用の収集。マスク判定には一切使わない。列判定は DOM 構造の序数のみ
+  // （colspan/rowspan は序数ベースの近似。幾何判定は導入しない）
+  let nextTableId = 0;
+  const tableIds = new Map();
+  const tableIdFor = (container) => {
+    if (!tableIds.has(container)) tableIds.set(container, nextTableId++);
+    return tableIds.get(container);
+  };
+  // el の祖先から行（tr / role="row"）を探し、所属テーブルの id と列序数を返す。
+  // 行に属さない要素は null。対象範囲は確定事項11 と同じ
+  // （table 要素と、role="row" を使う div 疑似テーブル。role 無し div グリッドは対象外）
+  const tableCellOf = (el) => {
+    let cell = el;
+    for (let e = parentOf(el); e; cell = e, e = parentOf(e)) {
+      const isTr = e.localName === "tr";
+      if (!isTr && e.getAttribute("role") !== "row") continue;
+      // 行直下の要素（cell）の序数 = 列。td/th は cellIndex（colspan 込みの
+      // テーブル上の位置）が取れるので優先する
+      let col = cell.cellIndex;
+      if (typeof col !== "number" || col < 0) {
+        col = 0;
+        for (let s = cell.previousElementSibling; s; s = s.previousElementSibling) col++;
+      }
+      // tableId の単位: tr は所属する table 要素、role="row" は行の親要素
+      const container = (isTr ? e.closest("table") : null) ?? parentOf(e);
+      return { tableId: tableIdFor(container), col };
+    }
+    return null;
+  };
+
   // フレーズ照合（ユーザーホワイトリスト・UIラベル辞書）の結合範囲を決める
   // 「ブロック」。インライン要素で分割されたテキスト（例: 株式会社<b>ABC</b>）を
   // 同じブロックに入れるため、最も近い非インライン祖先を単位にする
@@ -131,7 +165,7 @@
     icons.push({ x: bbox.x0, y: bbox.y0, w, h, kind });
   };
 
-  const pushLine = (blockId, semantic, kind, chars) => {
+  const pushLine = (blockId, semantic, kind, cell, chars) => {
     if (!chars.some((c) => c.ch.trim())) return; // 空白だけの行は捨てる
     const bbox = {
       x0: Math.min(...chars.map((c) => c.bbox.x0)),
@@ -146,6 +180,7 @@
     if (PUA_RUN.test(text) && HAS_PUA.test(text)) return pushIcon(bbox, "glyph");
     lines.push({
       blockId, semantic, kind,
+      tableId: cell?.tableId ?? null, col: cell?.col ?? null,
       words: [{
         text: chars.map((c) => c.ch).join(""),
         confidence: 100,
@@ -174,6 +209,7 @@
     }
     if (chars.length === 0) return;
     const { semantic, kind } = semanticOf(parent);
+    const cell = tableCellOf(parent);
     const blockId = blockIdOf(parent);
     // 折り返しで複数の視覚行にまたがるテキストノードは行ごとに分ける
     // （トークンの bbox union が行間の無関係な領域を巻き込まないように。
@@ -185,12 +221,12 @@
         ? Math.min(last.bbox.y1, c.bbox.y1) - Math.max(last.bbox.y0, c.bbox.y0)
         : 0;
       if (last && overlap < (c.bbox.y1 - c.bbox.y0) * 0.5) {
-        pushLine(blockId, semantic, kind, cur);
+        pushLine(blockId, semantic, kind, cell, cur);
         cur = [];
       }
       cur.push(c);
     }
-    if (cur.length) pushLine(blockId, semantic, kind, cur);
+    if (cur.length) pushLine(blockId, semantic, kind, cell, cur);
   };
 
   // フォーム部品の値はテキストノードにならないため、要素の value を
@@ -214,6 +250,7 @@
       x1: r.right + offset.x, y1: r.bottom + offset.y,
     };
     if (outsideViewport(bbox)) return;
+    const cell = tableCellOf(el);
     lines.push({
       blockId: blockIdOf(el),
       // submit/reset/button の value はボタンのラベル。それ以外はユーザー入力値
@@ -221,6 +258,7 @@
       // フォーム部品の種別。input は type まで区別する（text/email/date/password 等。
       // モック再現に直結する情報のため。Issue #48）
       kind: el.localName === "input" ? `input:${type || "text"}` : el.localName,
+      tableId: cell?.tableId ?? null, col: cell?.col ?? null,
       words: [{ text, confidence: 100, bbox, symbols: null }],
     });
   };

@@ -9,13 +9,17 @@
   // 無ければ単語単位のまま返す。DOM 経路は line.semantic（"label"|"data"|null）と
   // line.kind（semantic を決めた要素種別。th/td/nav/input:text 等。Issue #48）を
   // 持ち、各 unit にそのまま引き継ぐ（OCR 経路では undefined → null）。
-  // kind は判定に使わず、ワイヤーフレーム出力の customData.m2g へ透過するだけ
+  // kind と tableId/col（テーブルの列関連付け。Issue #50）は判定に使わず、
+  // ワイヤーフレーム出力の customData.m2g へ透過するだけ
   function lineToUnits(line, tokenizer) {
     const semantic = line.semantic ?? null;
     const kind = line.kind ?? null;
+    const tableId = line.tableId ?? null;
+    const col = line.col ?? null;
     if (!tokenizer) {
       return line.words.map((w) => ({
-        text: w.text, bbox: w.bbox, token: null, confidence: w.confidence, semantic, kind,
+        text: w.text, bbox: w.bbox, token: null, confidence: w.confidence,
+        semantic, kind, tableId, col,
       }));
     }
     // 信頼度は word のものを使う（枠線等のノイズは word confidence が 0 になる。
@@ -25,7 +29,8 @@
     const lineText = symbols.map((s) => s.text).join("");
     if (lineText.length === 0) {
       return line.words.map((w) => ({
-        text: w.text, bbox: w.bbox, token: null, confidence: w.confidence, semantic, kind,
+        text: w.text, bbox: w.bbox, token: null, confidence: w.confidence,
+        semantic, kind, tableId, col,
       }));
     }
     // 行テキストの文字位置 → symbol index の対応表（symbol が複数文字の場合に備える）
@@ -44,6 +49,8 @@
         token,
         semantic,
         kind,
+        tableId,
+        col,
         confidence: Math.min(...ss.map((s) => s.wordConfidence)),
         bbox: {
           x0: Math.min(...ss.map((s) => s.bbox.x0)),
@@ -122,6 +129,11 @@
     const kept = [];
     const decisions = [];
 
+    // 判定に使わない透過フィールド（ワイヤーフレーム出力用。Issue #48/#50）
+    const passthru = (unit) => ({
+      kind: unit.kind ?? null, tableId: unit.tableId ?? null, col: unit.col ?? null,
+    });
+
     // 行結合パターン（email / digit-run）に一致した unit は、トークンごとに
     // 矩形を置くとトークン間の空白が塗り残る（例: "090 - 1234 - 5678" の
     // スペース部分。桁のまとまりが読み取れてしまう）ため、同一行内で連続する
@@ -142,10 +154,11 @@
           y1: Math.max(last.bbox.y1, unit.bbox.y1),
         };
       } else {
-        // kind はラン先頭の unit のものを使う（同一行の連続一致なので実質同一要素）
+        // 透過フィールドはラン先頭の unit のものを使う
+        // （同一行の連続一致なので実質同一要素）
         runs.push({
           start: i, end: i, reason, texts: [unit.text],
-          bbox: { ...unit.bbox }, kind: unit.kind ?? null,
+          bbox: { ...unit.bbox }, ...passthru(unit),
         });
       }
     };
@@ -155,7 +168,7 @@
       const decide = (verdict, reason) => {
         decisions.push(`${unit.text}=${verdict}`);
         if (reason !== undefined) {
-          kept.push({ ...toRect(unit.bbox, 0), reason, text: unit.text, kind: unit.kind ?? null });
+          kept.push({ ...toRect(unit.bbox, 0), reason, text: unit.text, ...passthru(unit) });
         }
       };
       if (userProtected.has(i)) return decide("残:user", "user"); // ユーザー登録は無条件で勝つ
@@ -179,7 +192,7 @@
           decide("塗:dom-data");
           masks.push({
             ...toRect(unit.bbox, maskPadding), source: "auto", reason: "dom-data",
-            text: unit.text, kind: unit.kind ?? null,
+            text: unit.text, ...passthru(unit),
           });
           return;
         }
@@ -220,13 +233,13 @@
       }
       masks.push({
         ...toRect(unit.bbox, maskPadding), source: "auto", reason,
-        text: unit.text, kind: unit.kind ?? null,
+        text: unit.text, ...passthru(unit),
       });
     });
     for (const run of runs) {
       masks.push({
         ...toRect(run.bbox, maskPadding), source: "auto", reason: run.reason,
-        text: run.texts.join(""), kind: run.kind,
+        text: run.texts.join(""), kind: run.kind, tableId: run.tableId, col: run.col,
       });
     }
     return { masks, kept, decisions };

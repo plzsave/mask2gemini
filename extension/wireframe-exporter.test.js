@@ -201,6 +201,57 @@ test("customData: 手動マスク（reason 無し）は reason=manual になる"
   assert.deepEqual(file.elements[0].customData.m2g, { v: 1, role: "masked", reason: "manual" });
 });
 
+// ---- Issue #50: テーブルの列関連付け（tableId/col） ----
+
+test("customData: tableId/col がヘッダ text とセル masked の双方に透過され、同じ値で結べる", () => {
+  const file = buildWireframe({
+    masks: [{ x: 0, y: 30, w: 60, h: 20, reason: "dom-data", text: "山田", kind: "td", tableId: 0, col: 1 }],
+    kept: [{ ...keptUnit("氏名", 0), kind: "th", tableId: 0, col: 1 }],
+  });
+  const masked = file.elements.find((e) => e.customData.m2g.role === "masked");
+  const header = file.elements.find((e) => e.customData.m2g.role === "text");
+  assert.equal(masked.customData.m2g.tableId, header.customData.m2g.tableId);
+  assert.equal(masked.customData.m2g.col, header.customData.m2g.col);
+  assert.equal(masked.customData.m2g.col, 1);
+});
+
+test("customData: テーブル外の要素（tableId 無し）には tableId/col フィールド自体を出さない", () => {
+  const file = buildWireframe({
+    masks: [{ x: 0, y: 0, w: 60, h: 20, reason: "digit", text: "0901234", tableId: null, col: null }],
+    kept: [keptUnit("保存", 100)],
+  });
+  for (const e of file.elements) {
+    assert.ok(!("tableId" in e.customData.m2g));
+    assert.ok(!("col" in e.customData.m2g));
+  }
+});
+
+test("customData: col=0（先頭列）も出力される（falsy 値の取りこぼしがない）", () => {
+  const file = buildWireframe({
+    masks: [{ x: 0, y: 0, w: 60, h: 20, reason: "dom-data", text: "山田", kind: "td", tableId: 0, col: 0 }],
+    kept: [],
+  });
+  assert.equal(file.elements[0].customData.m2g.tableId, 0);
+  assert.equal(file.elements[0].customData.m2g.col, 0);
+});
+
+test("mergeTextRuns: tableId/col はマージ範囲で一致する場合のみ残る", () => {
+  const same = mergeTextRuns([
+    { ...keptUnit("氏", 0, { w: 15 }), tableId: 0, col: 1 },
+    { ...keptUnit("名", 16, { w: 15 }), tableId: 0, col: 1 },
+  ]);
+  assert.equal(same.length, 1);
+  assert.equal(same[0].col, 1);
+
+  const mixed = mergeTextRuns([
+    { ...keptUnit("氏名", 0, { w: 30 }), tableId: 0, col: 1 },
+    { ...keptUnit("続き", 31, { w: 30 }), tableId: 0, col: 2 },
+  ]);
+  assert.equal(mixed.length, 1);
+  assert.equal(mixed[0].tableId, null);
+  assert.equal(mixed[0].col, null);
+});
+
 // ---- Issue #49: スキーマバージョン ----
 
 test("customData: 全 m2g にスキーマバージョン v が刻まれる（docs/m2g-schema.md）", () => {
