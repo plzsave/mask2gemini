@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>近代 CSS 色記法の装飾抽出（E2E フィクスチャ）</title>
+  <!-- Issue #54: Tailwind CSS v4 系のパレットは oklch。Chrome は
+       getComputedStyle で oklch()/lab()/color()/color-mix() を rgb() に
+       正規化せず「書かれた記法のまま」返すため、rgb() 前提の文字列解析だと
+       装飾ボックス（decor）が 1 枚も取れなくなっていた。
+       ページ地を viewport 全面の背景として置き、その上に白カードを載せる
+       構成にして「地の色が落ちてカードが白地に溶ける」欠陥も同時に押さえる。
+       すべて架空の値 -->
+  <style>
+    /* ページ地: 薄灰（oklch）。既定 margin を残し、body の背景が
+       CSS のキャンバス伝播で全面に塗られる経路を通す */
+    body { font-family: system-ui, sans-serif; background: oklch(0.97 0.005 250); color: oklch(0.25 0 0); font-size: 13px; }
+    header { background: oklch(0.45 0.13 255); color: #fff; padding: 12px 16px; font-weight: 600; }
+    main { padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+    /* 白カード＋薄いボーダー: 背景と枠線が別色で出ること（Issue #54 原因3） */
+    .card { background: oklch(1 0 0); border: 1px solid oklch(0.9 0.005 250); padding: 16px; }
+    h2 { font-size: 14px; margin: 0 0 10px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { padding: 7px 10px; border-bottom: 1px solid oklch(0.92 0.004 250); text-align: left; }
+    th { background: color-mix(in oklab, oklch(0.45 0.13 255) 12%, white); font-weight: 600; }
+    /* lab() / color(display-p3) も同じ経路で拾えること */
+    .badge { display: inline-block; padding: 3px 10px; background: lab(88% -12 34); }
+    .bar { height: 14px; background: color(display-p3 0.2 0.45 0.75); }
+  </style>
+</head>
+<body>
+  <header data-check="keep">契約管理コンソール</header>
+  <main>
+    <section class="card">
+      <h2 data-check="keep">利用状況</h2>
+      <div class="bar" style="width: 220px"></div>
+      <div class="bar" style="width: 140px; margin-top: 6px"></div>
+      <p><span class="badge" data-check="keep">稼働中</span></p>
+    </section>
+    <section class="card">
+      <h2 data-check="keep">担当者一覧</h2>
+      <table>
+        <thead>
+          <tr>
+            <th data-check="keep">顧客名</th>
+            <th data-check="keep">担当</th>
+            <th data-check="keep">連絡先</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td data-check="mask">高橋物産株式会社</td>
+            <td data-check="mask">佐々木蓮</td>
+            <td data-check="mask">090-1234-5678</td>
+          </tr>
+          <tr>
+            <td data-check="mask">合同会社みどり企画</td>
+            <td data-check="mask">岡本さくら</td>
+            <td data-check="mask">sakura@example.com</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

@@ -370,7 +370,11 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     // マスク由来のハッチ矩形と、装飾由来の実色矩形（ヘッダー紺 #2b4a6f）が両方ある
     const rects = file.elements.filter((e) => e.type === "rectangle");
     expect(rects.some((r) => r.fillStyle === "hachure")).toBe(true);
-    expect(rects.some((r) => r.backgroundColor === "rgb(43, 74, 111)")).toBe(true);
+    expect(rects.some((r) => r.backgroundColor === "#2b4a6f")).toBe(true);
+    // Issue #54: ページ地（body の薄灰）がキャンバス色になり、その上の白カードと
+    // 分かれて見える。地を白固定にしていたときは白カードが溶けていた
+    expect(file.appState.viewBackgroundColor).toBe("#f5f6f8");
+    expect(rects.some((r) => r.backgroundColor === "#ffffff")).toBe(true);
     // customData: 抽出由来の全要素に意味のメタデータが刻まれている
     // （customData の無い要素 = 後から人間が追加したもの、という読み分けの前提）
     expect(file.elements.every((e) => e.customData?.m2g?.role)).toBe(true);
@@ -394,6 +398,49 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
       && e.customData.m2g.kind === "th"
       && e.customData.m2g.tableId === linkedCell.customData.m2g.tableId
       && e.customData.m2g.col === linkedCell.customData.m2g.col)).toBe(true);
+  });
+
+  test("ワイヤーフレーム出力（Issue #54）: oklch 等の近代 CSS 色記法でも背景色が取り込まれる", async ({ context, extensionId }) => {
+    // Chrome は getComputedStyle で oklch()/lab()/color()/color-mix() を rgb() に
+    // 正規化せず「書かれた記法のまま」返す。rgb() 前提の文字列解析だった頃は
+    // Tailwind v4 系（パレットが oklch）のページで decor が 0 個になっていた
+    let [sw] = context.serviceWorkers();
+    if (!sw) sw = await context.waitForEvent("serviceworker");
+    await sw.evaluate(() => chrome.storage.local.set({ wireframeExportEnabled: true }));
+
+    const { checks, domExtract, reviewPage } = await captureAndReview(
+      context, extensionId, "fixtures/modern-colors.html", { domPath: true });
+    assertChecks(checks, "fixtures/modern-colors.html (DOM)");
+
+    // 色はすべて sRGB の hex に正規化される（記法が漏れ出さない）
+    expect(domExtract.decor.length).toBeGreaterThan(0);
+    for (const d of domExtract.decor) {
+      for (const c of [d.bgColor, d.borderColor]) {
+        if (c !== null) expect(c).toMatch(/^#[0-9a-f]{6}([0-9a-f]{2})?$/);
+      }
+    }
+    // ページ地（body の oklch 薄灰）が拾えている
+    expect(domExtract.pageBackground).toMatch(/^#[0-9a-f]{6}$/);
+    expect(domExtract.pageBackground).not.toBe("#ffffff");
+
+    const [download] = await Promise.all([
+      reviewPage.waitForEvent("download"),
+      reviewPage.locator("#save-wireframe").click(),
+    ]);
+    const file = JSON.parse(fs.readFileSync(await download.path(), "utf8"));
+
+    expect(file.appState.viewBackgroundColor).toBe(domExtract.pageBackground);
+    const rects = file.elements.filter((e) => e.type === "rectangle" && e.fillStyle === "solid");
+    // 白カード（oklch(1 0 0)）が、地の色と分かれてキャンバス上に載る
+    const card = rects.find((r) => r.backgroundColor === "#ffffff");
+    expect(card).toBeTruthy();
+    expect(card.backgroundColor).not.toBe(file.appState.viewBackgroundColor);
+    // Issue #54 原因3: 背景色と枠線色を両方持つ要素は別々の色で出る
+    // （以前は枠線が背景と同色になり、カードの輪郭が消えていた）
+    expect(card.strokeColor).not.toBe("transparent");
+    expect(card.strokeColor).not.toBe(card.backgroundColor);
+    // ヘッダー（oklch）・バー（display-p3）・バッジ（lab）が色付き矩形として出る
+    expect(new Set(rects.map((r) => r.backgroundColor)).size).toBeGreaterThanOrEqual(4);
   });
 
   test("fixtures/pseudo-table.html（DOM経路）: role付き div 疑似テーブルのセルがデータとして塗られる（Issue #16）", async ({ context, extensionId }) => {

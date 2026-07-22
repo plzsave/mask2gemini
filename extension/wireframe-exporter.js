@@ -96,15 +96,22 @@
    * @param {object[]} input.kept    残存テキスト（画像 px・text 付き）
    * @param {object[]} [input.revealed] 確認画面で解除された自動マスク（画像 px・text 付き）。
    *   ユーザーが「残す」と確定した扱いでテキストとして出力する
-   * @param {object[]} [input.decor] dom-extractor の装飾ボックス（CSS px）
+   * @param {object[]} [input.decor] dom-extractor の装飾ボックス（CSS px）。
+   *   bgColor / borderColor は sRGB の #rrggbb[aa]（無い側は null。Issue #54）
    * @param {object[]} [input.icons] アイコン領域（Issue #23）。CSS px の bbox に加え、
    *   review.js がマスク済みキャンバスから切り抜いた dataURL（image/png）を持つ。
    *   切り抜き元は「① 画像をコピー」と同一のマスク適用後ピクセルなので、
    *   ここから漏えい面は広がらない（確定事項12 の派生）
    * @param {number} [input.scale]   画像 px → CSS px の除数（既定 1）
+   * @param {string} [input.pageBackground] ページ地の背景色（Issue #54）。
+   *   viewport を覆う背景は decor に含まれないため、キャンバス色として受け取る。
+   *   これが無いと「薄灰の地に白カード」が白地に白カードとして出力されてしまう
    * @returns {object} .excalidraw ファイル内容
    */
-  function buildWireframe({ masks, kept, revealed = [], decor = [], icons = [], scale = 1 }) {
+  function buildWireframe({
+    masks, kept, revealed = [], decor = [], icons = [], scale = 1,
+    pageBackground = "#ffffff",
+  }) {
     let n = 0;
     const nextId = (prefix) => `m2g-${prefix}-${(n++).toString(36).padStart(4, "0")}`;
     // すべての m2g にスキーマバージョン v を先頭で刻む（Issue #49）
@@ -118,8 +125,8 @@
         id: nextId("d"), type: "rectangle",
         x: round(d.x), y: round(d.y), width: round(d.w), height: round(d.h),
         fillStyle: "solid",
-        backgroundColor: d.bg ? d.color : "transparent",
-        strokeColor: d.border ? d.color : "transparent",
+        backgroundColor: d.bgColor ?? "transparent",
+        strokeColor: d.borderColor ?? "transparent",
         strokeWidth: 1, roughness: 1, groupIds: [],
         customData: meta({ role: "decor" }),
       });
@@ -196,7 +203,7 @@
       version: 2,
       source: "mask2gemini",
       elements,
-      appState: { viewBackgroundColor: "#ffffff" },
+      appState: { viewBackgroundColor: pageBackground },
       files,
     };
   }

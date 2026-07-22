@@ -17,11 +17,16 @@
 //                                             // words は常に 1 要素で、symbols に
 //                                             // 文字単位の bbox を持つ（OCR の symbol 相当）
 //     opaque: [{ x, y, w, h, kind }],         // 中身を読めない領域（丸塗り対象。確定事項10）
-//     decor: [{ x, y, w, h, bg, border, color }],
+//     decor: [{ x, y, w, h, bgColor, borderColor }],
 //                                             // 可視の背景色/ボーダーを持つ装飾ボックス
 //                                             // （棒グラフのバー・カード・表の罫線等）。
+//                                             // 色は sRGB の #rrggbb[aa]。無い側は null
+//                                             // （Issue #54。背景と枠線は別色で持つ）。
 //                                             // ワイヤーフレーム出力（Issue #20）専用の
 //                                             // 収集で、マスク判定には一切使わない
+//     pageBackground: "#rrggbb[aa]",          // ページ地の背景色（Issue #54）。viewport を
+//                                             // 覆う背景は decor から除外されるため、
+//                                             // ワイヤーフレームのキャンバス色として別に返す
 //     icons: [{ x, y, w, h, kind }],          // アイコン領域（Issue #23）。丸塗り閾値未満の
 //                                             // img/svg 等・background-image の小要素・
 //                                             // アイコンフォント（private-use 文字）。
@@ -276,11 +281,66 @@
     opaque.push({ x: bbox.x0, y: bbox.y0, w: bbox.x1 - bbox.x0, h: bbox.y1 - bbox.y0, kind });
   };
 
-  // computed style の色（rgb()/rgba() 形式）が不可視（alpha 0）でないか
-  const hasVisibleColor = (c) => {
-    const m = /^rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*(?:,\s*([\d.]+)\s*)?\)$/.exec(c);
-    return Boolean(m) && (m[1] === undefined || parseFloat(m[1]) > 0);
+  // computed style の色の正規化（Issue #54）。
+  // getComputedStyle が返す背景色/ボーダー色は「著者が書いた記法のまま」であり、
+  // Chrome は oklch() / lab() / color() / color-mix() を rgb() に正規化しない。
+  // Tailwind CSS v4 系のパレットは oklch なので、rgb() 前提の文字列解析だと
+  // そうしたページで装飾ボックスが 1 枚も取れなくなっていた。
+  // 従来記法は正規表現の高速パスで拾い、それ以外は 1x1 canvas に実際に塗って
+  // sRGB へラスタライズし、読み戻す（どの色記法でも同じ結果になる）。
+  const LEGACY_RGB = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/;
+  const colorCache = new Map();
+  let colorCtx;
+
+  const rasterizeColor = (c) => {
+    try {
+      // 無効な色を代入しても fillStyle は前の値のまま残るため、先に妥当性を見る
+      if (!globalThis.CSS?.supports?.("color", c)) return null;
+      colorCtx ??= new OffscreenCanvas(1, 1).getContext("2d", { willReadFrequently: true });
+      colorCtx.clearRect(0, 0, 1, 1);
+      colorCtx.fillStyle = c;
+      colorCtx.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = colorCtx.getImageData(0, 0, 1, 1).data;
+      return { r, g, b, a: a / 255 };
+    } catch {
+      return null; // OffscreenCanvas 不可・getImageData 失敗時は「色なし」に倒す
+    }
   };
+
+  /** computed style の色 → {r,g,b,a}。不可視（alpha 0）・解釈不能なら null */
+  const parseColor = (c) => {
+    if (!c) return null;
+    if (colorCache.has(c)) return colorCache.get(c);
+    const m = LEGACY_RGB.exec(c);
+    let v = m
+      ? { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : parseFloat(m[4]) }
+      : rasterizeColor(c);
+    if (v && !(v.a > 0)) v = null;
+    colorCache.set(c, v);
+    return v;
+  };
+
+  const hex2 = (n) => Math.round(n).toString(16).padStart(2, "0");
+  // Excalidraw に渡す色は hex に正規化する（rgb() 文字列より読み込み側の互換が広い）
+  const toHex = ({ r, g, b, a }) =>
+    `#${hex2(r)}${hex2(g)}${hex2(b)}${a < 1 ? hex2(a * 255) : ""}`;
+  const compositeOver = (fg, bg) => ({
+    r: fg.r * fg.a + bg.r * (1 - fg.a),
+    g: fg.g * fg.a + bg.g * (1 - fg.a),
+    b: fg.b * fg.a + bg.b * (1 - fg.a),
+    a: 1,
+  });
+
+  // ページ地（Issue #54）。viewport をほぼ覆う背景は装飾ボックスから除外される
+  // （DECOR_MAX_AREA_RATIO）ため、そのままでは白いキャンバスに白カードが溶けて
+  // 「薄灰の地に白カード」というありふれたレイアウトが完全に平坦になっていた。
+  // 除外した地の色を重ね順に合成して返し、ワイヤーフレームのキャンバス色に使う
+  let pageBg = { r: 255, g: 255, b: 255, a: 1 };
+  // html/body の背景は CSS の規定でキャンバス全面に伝播する（既定 margin により
+  // ボックス自体は viewport を覆わないので、覆域判定とは別に見る必要がある）
+  const isPageGround = (el, r) =>
+    el === document.documentElement || el === document.body
+    || (r.left <= 0 && r.top <= 0 && r.right >= vw && r.bottom >= vh);
 
   // 装飾ボックスの収集（Issue #20）。lines/opaque と独立で、マスク判定には使わない
   const collectDecor = (el, offset) => {
@@ -295,12 +355,21 @@
         x1: r.right + offset.x, y1: r.bottom + offset.y,
       }, "bg-image");
     }
-    const bg = hasVisibleColor(s.backgroundColor);
+    const bg = parseColor(s.backgroundColor);
     const border = parseFloat(s.borderTopWidth) > 0 && s.borderTopStyle !== "none"
-      && hasVisibleColor(s.borderTopColor);
+      ? parseColor(s.borderTopColor)
+      : null;
     if (!bg && !border) return;
     const r = el.getBoundingClientRect();
     if (r.width < DECOR_MIN_PX || r.height < DECOR_MIN_PX) return;
+    // ページ地は decor ではなくキャンバス色として持ち出す（Issue #54）。
+    // iframe 内の地はページ全体の色ではないので最上位ドキュメントに限る。
+    // html/body の背景はキャンバス全面に伝播しボックス自体は何も描かないため、
+    // 合成したら矩形としては出さない（同じ色の板を二重に置かない）
+    if (bg && offset.x === 0 && offset.y === 0 && isPageGround(el, r)) {
+      pageBg = compositeOver(bg, pageBg);
+      if (!border) return;
+    }
     if (r.width * r.height > vw * vh * DECOR_MAX_AREA_RATIO) return;
     const bbox = {
       x0: r.left + offset.x, y0: r.top + offset.y,
@@ -309,7 +378,10 @@
     if (outsideViewport(bbox)) return;
     decor.push({
       x: bbox.x0, y: bbox.y0, w: bbox.x1 - bbox.x0, h: bbox.y1 - bbox.y0,
-      bg, border, color: bg ? s.backgroundColor : s.borderTopColor,
+      // 背景と枠線は別々に持つ。以前は 1 色しか持たず、両方ある要素の枠線が
+      // 背景と同色＝不可視になっていた（Issue #54）
+      bgColor: bg ? toHex(bg) : null,
+      borderColor: border ? toHex(border) : null,
     });
   };
 
@@ -375,5 +447,8 @@
 
   visit(document.documentElement, { x: 0, y: 0 });
 
-  return { viewport: { w: vw, h: vh }, lines, opaque, decor, icons };
+  return {
+    viewport: { w: vw, h: vh }, lines, opaque, decor, icons,
+    pageBackground: toHex(pageBg),
+  };
 })();
