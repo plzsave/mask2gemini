@@ -232,6 +232,7 @@
   let wireframeScaleY = 1;
   let wireframeDecor = [];
   let wireframeIcons = [];
+  let wireframePageBg = "#ffffff";
   if (domExtract?.viewport?.w > 0 && domExtract?.viewport?.h > 0) {
     // dom-extractor.js の座標は CSS px。画像 px への係数は「画像サイズ ÷ viewport
     // サイズ」で出す（devicePixelRatio・ページズームをまとめて吸収する）
@@ -283,6 +284,7 @@
       wireframeScaleY = sy;
       wireframeDecor = domExtract.decor ?? [];
       wireframeIcons = domExtract.icons ?? [];
+      wireframePageBg = domExtract.pageBackground ?? "#ffffff";
     }
   }
 
@@ -554,7 +556,7 @@
     const file = globalThis.Mask2GeminiWireframeExporter.buildWireframe({
       masks, kept: allKept, revealed: revealedMasks,
       decor: wireframeDecor, icons: cropIconsFromMaskedCanvas(),
-      scale: wireframeScale,
+      scale: wireframeScale, pageBackground: wireframePageBg,
     });
     const blob = new Blob([JSON.stringify(file, null, 1)], { type: "application/json" });
     const a = document.createElement("a");
