@@ -397,6 +397,21 @@
     }
   };
 
+  // スクリーンリーダー専用（sr-only / visually-hidden）要素の検出（Issue #57）。
+  // Next.js の <next-route-announcer>、Tailwind .sr-only、Bootstrap .visually-hidden 等は
+  // テキストを clip で 0 面積に切り抜き、画面には 1px も描かない。だが
+  // display/visibility/opacity では隠していないため checkVisibility は「可視」を返し、
+  // DOM 経路だけがこの不可視テキストを拾ってマスクしていた。結果、確認画面に
+  // 「何も無い場所を塗っただけの矩形」が出る（スクショにも写らない過剰マスクで、
+  // 利用者が困惑する）。clip を 0 面積に潰す典型イディオムだけを対象にする。
+  // 角丸カード等の overflow:hidden は clip-path が inset(...round ...) で面積が残る
+  // ため誤検出しない。不可視＝スクショに描かれないので、外しても recall は落ちない
+  const isVisuallyHidden = (el) => {
+    const s = getComputedStyle(el);
+    return s.clip === "rect(0px, 0px, 0px, 0px)"
+      || s.clipPath === "inset(50%)" || s.clipPath === "inset(100%)";
+  };
+
   const visitAll = (nodes, offset) => { for (const n of nodes) visit(n, offset); };
 
   function visit(node, offset) {
@@ -412,6 +427,9 @@
       // （Issue #16 の fixture 作成で発覚した実バグ）ので、子孫の走査は続ける
       if (getComputedStyle(el).display !== "contents") return;
     }
+    // clip で 0 面積に潰された sr-only サブツリーは画面に描かれない → 走査しない
+    // （不可視テキストのマスク=過剰マスクを防ぐ。Issue #57）
+    if (isVisuallyHidden(el)) return;
     collectDecor(el, offset);
     if (OPAQUE_TAGS.has(tag)) return collectOpaque(el, offset, tag);
     if (tag === "iframe" || tag === "frame" || tag === "object" || tag === "embed") {
