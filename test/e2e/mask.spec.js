@@ -308,6 +308,11 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     // password の生の値は抽出結果（storage.session に入るデータ）に載らないこと。
     // 画面に見えない値の収集は目的外（sensitive-data-exposure 対策）
     expect(JSON.stringify(domExtract)).not.toContain("KAgi-9973-himitsu");
+    // スクリーンリーダー専用（sr-only / Next.js route announcer）の不可視テキストは
+    // 抽出しないこと（Issue #57）。載ると画面に何も無い場所を塗る過剰マスクになる。
+    // clip で 0 面積に潰された要素は描画されないので、外しても recall は落ちない
+    expect(JSON.stringify(domExtract)).not.toContain("阿久津さくら");
+    expect(JSON.stringify(domExtract)).not.toContain("綾小路 誠一郎");
   });
 
   test("fixtures/dashboard.html（DOM経路）: 数字+単位の隣接指標が過剰マスクされない（Issue #7）", async ({ context, extensionId }) => {
