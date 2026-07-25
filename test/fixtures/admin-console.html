@@ -34,7 +34,11 @@
        DOM 経路がテキストを拾ってマスクし「何も無い場所の矩形」を出していた。
        ここに人名（本来マスク対象）を仕込み、抽出結果に載らない＝マスクされない
        ことを検証する（不可視なのでスクショにも写らず recall には無関係） -->
-  <next-route-announcer><p aria-live="assertive" role="alert"
+  <!-- body がグリッドのため、announcer 自身も position:absolute でフローから外す
+       （static のままだとグリッドアイテムとして 1 行分を占有し、header が 1fr の
+         行に押し出されてレイアウトが崩れる）。検証対象は内側の p の clip なので
+       この指定はテストの意図を変えない -->
+  <next-route-announcer style="position:absolute"><p aria-live="assertive" role="alert"
     style="border:0;clip:rect(0 0 0 0);height:1px;margin:-1px;overflow:hidden;padding:0;position:absolute;width:1px;white-space:nowrap;word-wrap:normal">ワークフロー申請 - 担当 阿久津さくら</p></next-route-announcer>
   <span style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0">通知 3 件 宛先 綾小路 誠一郎</span>
   <header>
