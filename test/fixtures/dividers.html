@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>区切り線・外周フレーム（E2E フィクスチャ）</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #eef1f5; color: #222; }
+    /* 画面全体を囲むシェル。面積が viewport の 80% を超えるため、以前は
+       要素ごと捨てられて「上下左右の終端線」が出力に出てこなかった（Issue #59） */
+    .shell { max-width: 1180px; margin: 0 auto; background: #fff;
+             border: 1px solid #c8d0da; min-height: 900px; }
+    /* 以下はいずれも「背景色を持たず、1 辺だけの枠線で区切る」典型パターン。
+       borderTop しか見ていなかった頃は decor に 1 件も残らなかった */
+    .sec-head { border-bottom: 2px solid #3949ab; padding: 12px 16px; margin: 0;
+                font-size: 15px; }
+    .rule { border: none; border-top: 1px solid #d0d5da; margin: 0; }
+    .rows { list-style: none; padding: 0; margin: 0; }
+    .rows li { border-bottom: 1px solid #e3e7ec; padding: 10px 16px; font-size: 13px; }
+    .accent { border-left: 4px solid #3949ab; padding: 8px 16px; font-size: 13px; }
+    /* 高さ 1px の塗り divider。極小判定が「どちらか一辺」で切っていたため消えていた */
+    .thin-divider { height: 1px; background: #dfe3e8; }
+    table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    td, th { border-bottom: 1px solid #e3e7ec; padding: 8px 16px; text-align: left; }
+    th { background: #f2f5f8; }
+  </style>
+</head>
+<body>
+  <!-- すべて架空のダミーデータ。ワイヤーフレーム出力（Issue #20）で
+       ブロックの区切り線・外周の終端線が出ることを検証するためのフィクスチャ。
+       装飾抽出（decor）はマスク判定に一切使わないため、ここでの data-check は
+       「区切り線を拾うようにしても過剰マスクが増えていない」ことの確認用 -->
+  <div class="shell">
+    <h1 class="sec-head" data-check="keep">契約状況サマリ</h1>
+    <hr class="rule">
+    <ul class="rows">
+      <li><span data-check="keep">担当営業</span>: <span data-check="mask">室伏彩花</span></li>
+      <li><span data-check="keep">連絡先</span>: <span data-check="mask">090-8877-6655</span></li>
+    </ul>
+    <div class="thin-divider"></div>
+    <div class="accent">
+      <span data-check="keep">備考</span>: <span data-check="mask">гарантия@example.jp</span>
+    </div>
+    <table>
+      <tr>
+        <th data-check="keep">契約番号</th>
+        <th data-check="keep">契約先</th>
+      </tr>
+      <tr>
+        <td data-check="mask">CT-2026-0041</td>
+        <td data-check="mask">戸賀崎精機株式会社</td>
+      </tr>
+    </table>
+  </div>
+</body>
+</html>
