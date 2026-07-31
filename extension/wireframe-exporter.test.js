@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 
 require("./wireframe-exporter.js");
 
-const { buildWireframe, mergeTextRuns } = globalThis.Mask2GeminiWireframeExporter;
+const { buildWireframe, mergeTextRuns, screenColors } = globalThis.Mask2GeminiWireframeExporter;
 
 const keptUnit = (text, x, { y = 0, w = 30, h = 15, blockId = 0 } = {}) =>
   ({ text, x, y, w, h, reason: "allowlist", blockId });
@@ -390,4 +390,61 @@ test("mergeTextRuns: 行（y）やブロックが違えばマージしない", (
     keptUnit("ブロックB", 31, { blockId: 2 }),
   ]);
   assert.equal(byBlock.length, 2);
+});
+
+// ---- 画面の終端（Issue #61） ----
+
+test("buildWireframe: viewport を渡すと画面矩形（role: screen）が最背面に 1 枚出る", () => {
+  const file = buildWireframe({
+    masks: [], kept: [keptUnit("保存", 0)],
+    decor: [{ x: 10, y: 10, w: 50, h: 50, bgColor: "#ffffff", borderColor: null }],
+    pageBackground: "#f5f6f8", viewport: { w: 1280, h: 900 },
+  });
+  const screens = file.elements.filter((e) => e.customData?.m2g?.role === "screen");
+  assert.equal(screens.length, 1, "画面矩形は 1 枚だけ");
+  assert.equal(file.elements[0], screens[0], "最背面（先頭）に置く");
+
+  const s = screens[0];
+  assert.equal(s.type, "rectangle");
+  assert.deepEqual([s.x, s.y, s.width, s.height], [0, 0, 1280, 900]);
+  // 地の色は画面矩形の塗りになる（キャンバスではなく）
+  assert.equal(s.backgroundColor, "#f5f6f8");
+  assert.equal(s.fillStyle, "solid");
+  // 外周線は地と別色でなければ終端が見えない
+  assert.notEqual(s.strokeColor, s.backgroundColor);
+});
+
+test("buildWireframe: キャンバスは地からずらした色になり、画面の内外で色が変わる", () => {
+  const file = buildWireframe({
+    masks: [], kept: [], pageBackground: "#f5f6f8", viewport: { w: 800, h: 600 },
+  });
+  const screen = file.elements.find((e) => e.customData?.m2g?.role === "screen");
+  // ここが同色だと「地の色が無限に続く」＝画面の端が見えない状態に戻る
+  assert.notEqual(file.appState.viewBackgroundColor, screen.backgroundColor);
+});
+
+test("buildWireframe: viewport が無ければ画面矩形を出さず、従来どおり地をキャンバスに敷く", () => {
+  // OCR フォールバック経路には viewport が無い（Issue #54 の挙動を保つ）
+  const file = buildWireframe({ masks: [], kept: [], pageBackground: "#e9ecef" });
+  assert.equal(file.elements.filter((e) => e.customData?.m2g?.role === "screen").length, 0);
+  assert.equal(file.appState.viewBackgroundColor, "#e9ecef");
+});
+
+test("screenColors: 明るい地は暗い方へ、暗い地は明るい方へずらす（どちらでも差が出る）", () => {
+  const lum = (hex) => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const light = screenColors("#f5f6f8");
+  assert.ok(lum(light.canvas) < lum("#f5f6f8"), "明るい地 → キャンバスは暗く");
+  assert.ok(lum(light.edge) < lum(light.canvas), "外周線は面より強く振る");
+
+  const dark = screenColors("#1f2933");
+  assert.ok(lum(dark.canvas) > lum("#1f2933"), "暗い地 → キャンバスは明るく");
+  assert.ok(lum(dark.edge) > lum(dark.canvas));
+
+  // 決定的（同入力 → 同出力。確定事項12）
+  assert.deepEqual(screenColors("#f5f6f8"), screenColors("#f5f6f8"));
+  // 解釈できない値でも落ちず、白地として扱う
+  assert.deepEqual(screenColors(undefined), screenColors("#ffffff"));
 });

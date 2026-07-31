@@ -168,7 +168,16 @@ DOM 経路は OCR の `lineToUnits` に相当する変換（`domToUnits`）を�
 - 塗る判定・手動マスク → `rectangle`（hachure 塗り・**元文字列は書かない**）。
   読めない領域由来（reason が opaque）は cross-hatch で塗り分ける
 - 確認画面で解除した自動マスク → テキストとして出力（ユーザーが「残す」と確定した扱い）
-- 装飾（decor）→ 実際の背景色・ボーダー色を持つ `rectangle`（最背面）。
+- 撮影された画面（Issue #61）→ ページ地の色で塗った viewport 大の `rectangle`
+  （`role: "screen"`。最背面に必ず 1 枚だけ）。ページ地を Excalidraw の
+  `appState.viewBackgroundColor` に入れると**無限キャンバス全体**が塗られ、
+  画面の端が視覚的に存在しなくなるため、地は矩形として置きキャンバスには
+  地から明暗をずらした色を敷く。塗りの境目がそのまま画面の終端になる。
+  キャンバス色・外周線の色はページ地から決定的に導く（明るい地なら暗い方へ、
+  暗い地なら明るい方へずらすので、どちらでも必ず差が出る）。
+  viewport を取れない経路（OCR フォールバック）では画面矩形を出さず、
+  従来どおり地の色をキャンバスに敷く
+- 装飾（decor）→ 実際の背景色・ボーダー色を持つ `rectangle`（画面矩形の上）。
   背景と枠線は別色（Issue #54）
 - ページ地（pageBackground）→ `appState.viewBackgroundColor`（Issue #54）
 - アイコン（icons・Issue #23）→ **マスク済みキャンバスから該当領域を切り抜いた

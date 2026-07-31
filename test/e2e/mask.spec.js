@@ -376,9 +376,11 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     const rects = file.elements.filter((e) => e.type === "rectangle");
     expect(rects.some((r) => r.fillStyle === "hachure")).toBe(true);
     expect(rects.some((r) => r.backgroundColor === "#2b4a6f")).toBe(true);
-    // Issue #54: ページ地（body の薄灰）がキャンバス色になり、その上の白カードと
-    // 分かれて見える。地を白固定にしていたときは白カードが溶けていた
-    expect(file.appState.viewBackgroundColor).toBe("#f5f6f8");
+    // Issue #54: ページ地（body の薄灰）が持ち込まれ、その上の白カードと
+    // 分かれて見える。地を白固定にしていたときは白カードが溶けていた。
+    // Issue #61 以降、地はキャンバスではなく画面矩形の塗りになる
+    const screen = file.elements.find((e) => e.customData?.m2g?.role === "screen");
+    expect(screen.backgroundColor).toBe("#f5f6f8");
     expect(rects.some((r) => r.backgroundColor === "#ffffff")).toBe(true);
     // customData: 抽出由来の全要素に意味のメタデータが刻まれている
     // （customData の無い要素 = 後から人間が追加したもの、という読み分けの前提）
@@ -434,12 +436,15 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     ]);
     const file = JSON.parse(fs.readFileSync(await download.path(), "utf8"));
 
-    expect(file.appState.viewBackgroundColor).toBe(domExtract.pageBackground);
+    // 地（oklch の薄灰）は画面矩形の塗りとして持ち込まれる（Issue #61 以降。
+    // キャンバスに入れると無限に広がり、画面の終端が見えなくなるため）
+    const screen = file.elements.find((e) => e.customData?.m2g?.role === "screen");
+    expect(screen.backgroundColor).toBe(domExtract.pageBackground);
     const rects = file.elements.filter((e) => e.type === "rectangle" && e.fillStyle === "solid");
-    // 白カード（oklch(1 0 0)）が、地の色と分かれてキャンバス上に載る
+    // 白カード（oklch(1 0 0)）が、地の色と分かれて画面の上に載る
     const card = rects.find((r) => r.backgroundColor === "#ffffff");
     expect(card).toBeTruthy();
-    expect(card.backgroundColor).not.toBe(file.appState.viewBackgroundColor);
+    expect(card.backgroundColor).not.toBe(screen.backgroundColor);
     // Issue #54 原因3: 背景色と枠線色を両方持つ要素は別々の色で出る
     // （以前は枠線が背景と同色になり、カードの輪郭が消えていた）
     expect(card.strokeColor).not.toBe("transparent");
@@ -470,8 +475,19 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     const decor = file.elements.filter(
       (e) => e.type === "rectangle" && e.customData?.m2g?.role === "decor");
 
-    // 外周の終端線: viewport の大部分を覆うシェルが、塗りではなく枠線として出る
-    // （塗りで出すとキャンバス色と二重になるため、面積ガードは塗りにだけ掛ける）
+    // 画面の終端（Issue #61）: ページ地を塗った viewport 大の矩形が最背面に 1 枚。
+    // キャンバス（画面外）は地からずらした色なので、塗りの境目が画面の端になる。
+    // ページ側に枠線付きコンテナが無い画面（大半の実ページ）でも必ず出る
+    const screen = file.elements.filter((e) => e.customData?.m2g?.role === "screen");
+    expect(screen.length).toBe(1);
+    expect(file.elements[0]).toBe(screen[0]);
+    expect(screen[0].width).toBe(1280);
+    expect(screen[0].height).toBe(900);
+    expect(file.appState.viewBackgroundColor).not.toBe(screen[0].backgroundColor);
+    expect(screen[0].strokeColor).not.toBe(screen[0].backgroundColor);
+
+    // ページ側のシェルの枠線は、塗りではなく枠線として出る（面積ガードは
+    // 塗りにだけ掛かる）。画面矩形とは別物で、こちらは実在の DOM 要素
     const frame = decor.find((d) => d.width > 1000 && d.height > 800);
     expect(frame).toBeTruthy();
     expect(frame.strokeColor).toBe("#c8d0da");

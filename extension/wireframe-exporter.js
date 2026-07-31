@@ -16,6 +16,8 @@
 // - role: "masked"（+ reason=判定種別。文字列そのものではないので漏えいなし）
 //         / "text"（残存 UI テキスト） / "revealed"（確認画面で解除された語）
 //         / "decor"（装飾） / "icon"（+ kind）
+//         / "screen"（撮影された画面の範囲そのもの。DOM の要素ではない合成矩形で、
+//           これ 1 枚だけが最背面に置かれる。Issue #61）
 // - kind: DOM の要素種別（th/td/label/nav/h1/button/input:text 等。Issue #48）。
 //         dom-extractor が semantic 判定時に見た種別の透過で、取れたときだけ載る。
 //         タグ名・type 属性であって内容ではないため漏えい面は増えない
@@ -46,6 +48,42 @@
   const SPACE_GAP_RATIO = 0.15;
 
   const round = (v) => Math.round(v * 100) / 100;
+
+  // 画面の終端（Issue #61）。ページ地の色を Excalidraw の
+  // appState.viewBackgroundColor に入れると**無限キャンバス全体**が塗られるため、
+  // 画面の端が視覚的に存在しなくなっていた（地の色が画面外まで続く）。
+  // 代わりにページ地を viewport サイズの矩形として置き、キャンバスには
+  // 地から明暗をずらした色を敷く。塗りの境目がそのまま「撮影された画面の範囲」になる。
+  //
+  // 色はページ地から決定的に導く（乱数・固定色ではない。確定事項12）。
+  // 明るい地なら暗い方へ、暗い地なら明るい方へずらすので、どちらでも必ず差が出る
+  const HEX_RE = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i;
+  const CANVAS_SHIFT = 0.45; // キャンバス（画面外）のずらし量
+  const EDGE_SHIFT = 0.75;   // 外周線のずらし量。面より強く振って輪郭を立てる
+
+  const parseHex = (hex) => {
+    const m = HEX_RE.exec(String(hex ?? ""));
+    return m ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) } : null;
+  };
+  const hex2 = (n) => Math.round(n).toString(16).padStart(2, "0");
+  const shiftToward = ({ r, g, b }, target, amt) =>
+    `#${hex2(r + (target - r) * amt)}${hex2(g + (target - g) * amt)}${hex2(b + (target - b) * amt)}`;
+
+  /**
+   * ページ地の色から、画面外（キャンバス）と画面の端（外周線）の色を決める。
+   * @param {string} pageBackground `#rrggbb[aa]`
+   * @returns {{canvas: string, edge: string}}
+   */
+  function screenColors(pageBackground) {
+    const c = parseHex(pageBackground) ?? { r: 255, g: 255, b: 255 };
+    // 知覚的な明るさ（相対輝度の近似）。明るい地かどうかだけ分かればよい
+    const light = (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) / 255 > 0.5;
+    const target = light ? 0 : 255;
+    return {
+      canvas: shiftToward(c, target, CANVAS_SHIFT),
+      edge: shiftToward(c, target, EDGE_SHIFT),
+    };
+  }
 
   /**
    * kept（残存テキスト）を視覚行ごとにまとめ、行内で近接する断片を 1 テキストに
@@ -104,13 +142,16 @@
    *   ここから漏えい面は広がらない（確定事項12 の派生）
    * @param {number} [input.scale]   画像 px → CSS px の除数（既定 1）
    * @param {string} [input.pageBackground] ページ地の背景色（Issue #54）。
-   *   viewport を覆う背景は decor に含まれないため、キャンバス色として受け取る。
+   *   viewport を覆う背景は decor に含まれないため、別に受け取る。
    *   これが無いと「薄灰の地に白カード」が白地に白カードとして出力されてしまう
+   * @param {{w:number,h:number}} [input.viewport] 撮影された画面の大きさ（CSS px。
+   *   Issue #61）。これを受け取ったときだけ、ページ地を viewport サイズの矩形
+   *   （role: "screen"）として最背面に置き、画面の終端が分かるようにする
    * @returns {object} .excalidraw ファイル内容
    */
   function buildWireframe({
     masks, kept, revealed = [], decor = [], icons = [], scale = 1,
-    pageBackground = "#ffffff",
+    pageBackground = "#ffffff", viewport = null,
   }) {
     let n = 0;
     const nextId = (prefix) => `m2g-${prefix}-${(n++).toString(36).padStart(4, "0")}`;
@@ -119,7 +160,24 @@
     const groupIds = (blockId) => (blockId === undefined ? [] : [`block-${blockId}`]);
     const elements = [];
 
-    // 最背面: 装飾ボックス（実際の色を持ち込む。カード・バー・罫線）
+    // 最背面: 画面そのもの（Issue #61）。ページ地の色で塗った viewport 大の矩形で、
+    // その外縁が「撮影された画面の終端」になる。DOM の特定要素に対応しない
+    // 合成要素なので、role は decor と分けて "screen" にする（カードやパネルと
+    // 取り違えられないように。docs/m2g-schema.md 参照）
+    const screen = screenColors(pageBackground);
+    if (viewport?.w > 0 && viewport?.h > 0) {
+      elements.push({
+        id: nextId("s"), type: "rectangle",
+        x: 0, y: 0, width: round(viewport.w), height: round(viewport.h),
+        fillStyle: "solid",
+        backgroundColor: pageBackground,
+        strokeColor: screen.edge,
+        strokeWidth: 1, roughness: 0, groupIds: [],
+        customData: meta({ role: "screen" }),
+      });
+    }
+
+    // 装飾ボックス（実際の色を持ち込む。カード・バー・罫線）
     for (const d of decor) {
       elements.push({
         id: nextId("d"), type: "rectangle",
@@ -203,10 +261,13 @@
       version: 2,
       source: "mask2gemini",
       elements,
-      appState: { viewBackgroundColor: pageBackground },
+      // 画面の範囲を塗りで示すため、キャンバス（画面外）は地からずらした色にする。
+      // viewport が無い経路（OCR フォールバック等）は画面矩形を置けないので、
+      // 従来どおり地の色をそのままキャンバスに敷く（Issue #54 の挙動）
+      appState: { viewBackgroundColor: viewport ? screen.canvas : pageBackground },
       files,
     };
   }
 
-  globalThis.Mask2GeminiWireframeExporter = { buildWireframe, mergeTextRuns };
+  globalThis.Mask2GeminiWireframeExporter = { buildWireframe, mergeTextRuns, screenColors };
 })();

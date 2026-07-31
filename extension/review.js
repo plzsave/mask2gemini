@@ -233,6 +233,8 @@
   let wireframeDecor = [];
   let wireframeIcons = [];
   let wireframePageBg = "#ffffff";
+  // 撮影された画面の大きさ（CSS px）。ワイヤーフレームの画面矩形に使う（Issue #61）
+  let wireframeViewport = null;
   if (domExtract?.viewport?.w > 0 && domExtract?.viewport?.h > 0) {
     // dom-extractor.js の座標は CSS px。画像 px への係数は「画像サイズ ÷ viewport
     // サイズ」で出す（devicePixelRatio・ページズームをまとめて吸収する）
@@ -285,6 +287,7 @@
       wireframeDecor = domExtract.decor ?? [];
       wireframeIcons = domExtract.icons ?? [];
       wireframePageBg = domExtract.pageBackground ?? "#ffffff";
+      wireframeViewport = { w: domExtract.viewport.w, h: domExtract.viewport.h };
     }
   }
 
@@ -557,6 +560,7 @@
       masks, kept: allKept, revealed: revealedMasks,
       decor: wireframeDecor, icons: cropIconsFromMaskedCanvas(),
       scale: wireframeScale, pageBackground: wireframePageBg,
+      viewport: wireframeViewport,
     });
     const blob = new Blob([JSON.stringify(file, null, 1)], { type: "application/json" });
     const a = document.createElement("a");
