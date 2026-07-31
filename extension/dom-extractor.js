@@ -22,6 +22,10 @@
 //                                             // （棒グラフのバー・カード・表の罫線等）。
 //                                             // 色は sRGB の #rrggbb[aa]。無い側は null
 //                                             // （Issue #54。背景と枠線は別色で持つ）。
+//                                             // 4 辺が同色の枠線は borderColor 付きの
+//                                             // 矩形 1 枚、1 辺だけの枠線（区切り線・
+//                                             // アクセント罫線）はその辺の位置の薄い
+//                                             // 矩形を bgColor 側で出す（Issue #59）。
 //                                             // ワイヤーフレーム出力（Issue #20）専用の
 //                                             // 収集で、マスク判定には一切使わない
 //     pageBackground: "#rrggbb[aa]",          // ページ地の背景色（Issue #54）。viewport を
@@ -342,6 +346,51 @@
     el === document.documentElement || el === document.body
     || (r.left <= 0 && r.top <= 0 && r.right >= vw && r.bottom >= vh);
 
+  // 枠線は 4 辺それぞれ見る（Issue #59）。ブロックの区切りとして最も一般的なのは
+  // border-bottom（見出しの下線・リスト行の罫線）と border-left（アクセント罫線）で、
+  // 従来は borderTop しか見ていなかったため、背景色を持たない区切り線が
+  // 丸ごと落ちていた（区切り線だけを並べたページで decor が 0 件になる）
+  const SIDES = ["Top", "Right", "Bottom", "Left"];
+  const edgesOf = (s) => {
+    const out = [];
+    for (const side of SIDES) {
+      const w = parseFloat(s[`border${side}Width`]);
+      if (!(w > 0) || s[`border${side}Style`] === "none") continue;
+      const color = parseColor(s[`border${side}Color`]);
+      if (color) out.push({ side, w, color });
+    }
+    return out;
+  };
+  // 4 辺が同じ色で揃っているならフレーム 1 枚として出せる（辺ごとに分けない）
+  const uniformEdgeColor = (edges) => {
+    if (edges.length !== SIDES.length) return null;
+    const hex = toHex(edges[0].color);
+    return edges.every((e) => toHex(e.color) === hex) ? hex : null;
+  };
+
+  const pushDecor = (d) => {
+    if (decor.length >= DECOR_LIMIT) return;
+    if (outsideViewport({ x0: d.x, y0: d.y, x1: d.x + d.w, y1: d.y + d.h })) return;
+    decor.push(d);
+  };
+
+  // 1 辺だけの枠線は、その辺の位置に薄い矩形として出す（Issue #59）。
+  // Excalidraw の line 要素は上流スキーマ未確認のため使わない
+  // （ファイル冒頭の設計制約）。DOM 上も border は矩形なのでモデルとして素直
+  const pushEdge = ({ side, w, color }, box) => {
+    const hex = toHex(color);
+    const t = Math.max(w, 1); // サブピクセルの罫線も 1px の線として見えるようにする
+    const geom = {
+      Top: { x: box.x, y: box.y, w: box.w, h: t },
+      Bottom: { x: box.x, y: box.y + box.h - t, w: box.w, h: t },
+      Left: { x: box.x, y: box.y, w: t, h: box.h },
+      Right: { x: box.x + box.w - t, y: box.y, w: t, h: box.h },
+    }[side];
+    // 罫線は「その色で塗られた細い面」。枠線色として持たせると
+    // Excalidraw 側で 4 辺が描かれてしまい、1 辺の罫線を表現できない
+    pushDecor({ ...geom, bgColor: hex, borderColor: null });
+  };
+
   // 装飾ボックスの収集（Issue #20）。lines/opaque と独立で、マスク判定には使わない
   const collectDecor = (el, offset) => {
     if (decor.length >= DECOR_LIMIT) return;
@@ -356,33 +405,49 @@
       }, "bg-image");
     }
     const bg = parseColor(s.backgroundColor);
-    const border = parseFloat(s.borderTopWidth) > 0 && s.borderTopStyle !== "none"
-      ? parseColor(s.borderTopColor)
-      : null;
-    if (!bg && !border) return;
+    const edges = edgesOf(s);
+    if (!bg && edges.length === 0) return;
     const r = el.getBoundingClientRect();
-    if (r.width < DECOR_MIN_PX || r.height < DECOR_MIN_PX) return;
+    // 罫線は「片方の辺だけが極小」なのが正常な形なので、どちらか一辺で切ると
+    // 区切り線そのものが必ず消える（Issue #59）。捨てたいのは両辺とも極小な
+    // 「点」（アイコン枠の欠片等）であって、線ではない
+    if (r.width < DECOR_MIN_PX && r.height < DECOR_MIN_PX) return;
     // ページ地は decor ではなくキャンバス色として持ち出す（Issue #54）。
     // iframe 内の地はページ全体の色ではないので最上位ドキュメントに限る。
     // html/body の背景はキャンバス全面に伝播しボックス自体は何も描かないため、
     // 合成したら矩形としては出さない（同じ色の板を二重に置かない）
+    let pageGroundBg = false;
     if (bg && offset.x === 0 && offset.y === 0 && isPageGround(el, r)) {
       pageBg = compositeOver(bg, pageBg);
-      if (!border) return;
+      pageGroundBg = true;
+      if (edges.length === 0) return;
     }
-    if (r.width * r.height > vw * vh * DECOR_MAX_AREA_RATIO) return;
-    const bbox = {
-      x0: r.left + offset.x, y0: r.top + offset.y,
-      x1: r.right + offset.x, y1: r.bottom + offset.y,
+    const box = {
+      x: r.left + offset.x, y: r.top + offset.y, w: r.width, h: r.height,
     };
-    if (outsideViewport(bbox)) return;
-    decor.push({
-      x: bbox.x0, y: bbox.y0, w: bbox.x1 - bbox.x0, h: bbox.y1 - bbox.y0,
-      // 背景と枠線は別々に持つ。以前は 1 色しか持たず、両方ある要素の枠線が
-      // 背景と同色＝不可視になっていた（Issue #54）
-      bgColor: bg ? toHex(bg) : null,
-      borderColor: border ? toHex(border) : null,
-    });
+    // 面積ガードは**塗りにだけ**掛ける（Issue #59）。巨大な塗りはキャンバス色と
+    // 二重になるので出さないが、枠線だけなら二重塗りの問題は起きない。
+    // ここで要素ごと捨てていたため、画面全体を囲むシェルの枠線＝
+    // 上下左右の終端線が出力に出てこなかった
+    const tooLarge = r.width * r.height > vw * vh * DECOR_MAX_AREA_RATIO;
+    const frame = uniformEdgeColor(edges);
+    let filled = false;
+    if (bg && !pageGroundBg && !tooLarge) {
+      pushDecor({
+        ...box,
+        // 背景と枠線は別々に持つ。以前は 1 色しか持たず、両方ある要素の枠線が
+        // 背景と同色＝不可視になっていた（Issue #54）
+        bgColor: toHex(bg),
+        borderColor: frame, // 4 辺が同色ならこの 1 枚で枠線も表現できる
+      });
+      filled = true;
+    }
+    if (frame) {
+      if (!filled) pushDecor({ ...box, bgColor: null, borderColor: frame });
+      return; // 4 辺揃いは枠付き矩形 1 枚で足りる（辺ごとに分けない）
+    }
+    // 辺が揃っていない（= 区切り線・アクセント罫線）ものは辺ごとに出す
+    for (const e of edges) pushEdge(e, box);
   };
 
   // closed shadow root は content script（isolated world）でだけ

@@ -448,6 +448,50 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
     expect(new Set(rects.map((r) => r.backgroundColor)).size).toBeGreaterThanOrEqual(4);
   });
 
+  test("ワイヤーフレーム出力（Issue #59）: ブロックの区切り線と外周の終端線が出る", async ({ context, extensionId }) => {
+    // 背景色を持たず 1 辺の枠線だけで区切るブロック（見出しの下線・リスト行の
+    // 罫線・左アクセント）と、画面全体を囲むシェルの枠線が拾えること。
+    // 以前は borderTop しか見ておらず、細い要素は極小判定で消え、外周は
+    // 面積ガードで消えていたため、この fixture の decor は 0 件だった
+    let [sw] = context.serviceWorkers();
+    if (!sw) sw = await context.waitForEvent("serviceworker");
+    await sw.evaluate(() => chrome.storage.local.set({ wireframeExportEnabled: true }));
+
+    const { checks, domExtract, reviewPage } = await captureAndReview(
+      context, extensionId, "fixtures/dividers.html", { domPath: true });
+    // 区切り線を拾うようにしても、マスク判定（decor とは独立）は変わらない
+    assertChecks(checks, "fixtures/dividers.html (DOM)");
+
+    const [download] = await Promise.all([
+      reviewPage.waitForEvent("download"),
+      reviewPage.locator("#save-wireframe").click(),
+    ]);
+    const file = JSON.parse(fs.readFileSync(await download.path(), "utf8"));
+    const decor = file.elements.filter(
+      (e) => e.type === "rectangle" && e.customData?.m2g?.role === "decor");
+
+    // 外周の終端線: viewport の大部分を覆うシェルが、塗りではなく枠線として出る
+    // （塗りで出すとキャンバス色と二重になるため、面積ガードは塗りにだけ掛ける）
+    const frame = decor.find((d) => d.width > 1000 && d.height > 800);
+    expect(frame).toBeTruthy();
+    expect(frame.strokeColor).toBe("#c8d0da");
+    expect(frame.backgroundColor).toBe("transparent");
+
+    // 区切り線: 横に長く高さが数 px の帯。見出しの下線(2px #3949ab)・
+    // hr(1px #d0d5da)・リスト行(1px #e3e7ec)・薄い divider(1px #dfe3e8)
+    const hLines = decor.filter((d) => d.width > 400 && d.height <= 4);
+    expect(hLines.length).toBeGreaterThanOrEqual(4);
+    // 罫線は「その色で塗られた細い面」として出る（枠線色にすると Excalidraw が
+    // 4 辺を描いてしまい、1 辺の罫線を表現できない）
+    for (const l of hLines) expect(l.backgroundColor).toMatch(/^#[0-9a-f]{6}$/);
+    expect(new Set(hLines.map((l) => l.backgroundColor))).toContain("#3949ab");
+    expect(new Set(hLines.map((l) => l.backgroundColor))).toContain("#d0d5da");
+
+    // 左アクセント罫線: 縦に長く幅が数 px
+    const vLine = decor.find((d) => d.height > 20 && d.width <= 4 && d.backgroundColor === "#3949ab");
+    expect(vLine).toBeTruthy();
+  });
+
   test("fixtures/pseudo-table.html（DOM経路）: role付き div 疑似テーブルのセルがデータとして塗られる（Issue #16）", async ({ context, extensionId }) => {
     // role="row" 配下のセル（cell role 無し）が td 同等の dom-data 扱いになり、
     // columnheader は残ること。role 無しの素の div グリッドはテキスト面ルールのみ
