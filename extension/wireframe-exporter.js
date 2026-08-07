@@ -49,6 +49,15 @@
 
   const round = (v) => Math.round(v * 100) / 100;
 
+  // 最終マスクと重なる抽出テキストは構造化出力へ含めない（Issue #64）。
+  // 確認画面の kept は初期判定の結果、revealed は解除履歴であり、その後にユーザーが
+  // 手動マスクを追加しても配列自体からは消えない。見た目では黒塗り／ハッチに戻って
+  // いても text/originalText が JSON に残らないよう、最終 masks を出力時の正とする。
+  // 一部分だけを手動で隠した場合も元文字列全体を復元できないよう、重なりは面積が
+  // 1px でもあれば対象にする（辺が接するだけの場合は重なりとみなさない）。
+  const rectsOverlap = (a, b) =>
+    a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
   // 画面の終端（Issue #61）。ページ地の色を Excalidraw の
   // appState.viewBackgroundColor に入れると**無限キャンバス全体**が塗られるため、
   // 画面の端が視覚的に存在しなくなっていた（地の色が画面外まで続く）。
@@ -223,9 +232,11 @@
       }
       return m2g;
     };
+    const isCoveredByFinalMask = (item) => masks.some((m) => rectsOverlap(item, m));
     const textItems = [
-      ...mergeTextRuns(kept).map((t) => ({ ...t, m2g: annotate({ role: "text" }, t) })),
-      ...revealed.filter((m) => m.text)
+      ...mergeTextRuns(kept.filter((k) => !isCoveredByFinalMask(k)))
+        .map((t) => ({ ...t, m2g: annotate({ role: "text" }, t) })),
+      ...revealed.filter((m) => m.text && !isCoveredByFinalMask(m))
         .map((m) => ({ ...m, m2g: annotate({ role: "revealed", reason: m.reason }, m) })),
     ];
     for (const t of textItems) {

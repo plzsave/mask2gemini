@@ -407,6 +407,61 @@ test.describe("mask2gemini E2E（実 OCR）", () => {
       && e.customData.m2g.col === linkedCell.customData.m2g.col)).toBe(true);
   });
 
+  test("ワイヤーフレーム出力（Issue #64）: 手動で再マスクした文字列を含まない", async ({ context, extensionId }) => {
+    let [sw] = context.serviceWorkers();
+    if (!sw) sw = await context.waitForEvent("serviceworker");
+    await sw.evaluate(() => chrome.storage.local.set({ wireframeExportEnabled: true }));
+
+    const { checks, reviewPage } = await captureAndReview(
+      context, extensionId, "fixtures/dashboard.html", { domPath: true });
+    const keptTarget = checks.find((c) => c.text === "稼働率");
+    const revealedTarget = checks.find((c) => c.text === "藤田");
+    expect(keptTarget).toBeTruthy();
+    expect(revealedTarget).toBeTruthy();
+
+    const canvas = reviewPage.locator("#canvas");
+    const size = await canvas.evaluate((el) => ({ width: el.width, height: el.height }));
+    // 編集後のステータス文言でツールバーの折り返し・高さが変わり得るため、
+    // canvas の画面座標は操作のたびに取り直す。
+    const point = async (x, y) => {
+      const box = await canvas.boundingBox();
+      return {
+        x: box.x + x * (box.width / size.width),
+        y: box.y + y * (box.height / size.height),
+      };
+    };
+    const dragMask = async (r) => {
+      const start = await point(r.x - 2, r.y - 2);
+      const end = await point(r.x + r.w + 2, r.y + r.h + 2);
+      await reviewPage.mouse.move(start.x, start.y);
+      await reviewPage.mouse.down();
+      await reviewPage.mouse.move(end.x, end.y, { steps: 5 });
+      await reviewPage.mouse.up();
+    };
+
+    // 自動判定で残った語を手動マスクするケース。
+    await dragMask(keptTarget);
+
+    // 自動マスクを一度解除し、同じ場所を手動で再マスクするケース。
+    const revealPoint = await point(
+      revealedTarget.x + revealedTarget.w / 2,
+      revealedTarget.y + revealedTarget.h / 2,
+    );
+    await reviewPage.mouse.click(revealPoint.x, revealPoint.y);
+    await expect(reviewPage.locator("#register-zone button")).toContainText("藤田");
+    await dragMask(revealedTarget);
+
+    const [download] = await Promise.all([
+      reviewPage.waitForEvent("download"),
+      reviewPage.locator("#save-wireframe").click(),
+    ]);
+    const json = fs.readFileSync(await download.path(), "utf8");
+    expect(json).not.toContain("稼働率");
+    expect(json).not.toContain("藤田");
+    // 最終マスクと重ならない残存テキストは従来どおり出力する。
+    expect(json).toContain("運用ダッシュボード");
+  });
+
   test("ワイヤーフレーム出力（Issue #54）: oklch 等の近代 CSS 色記法でも背景色が取り込まれる", async ({ context, extensionId }) => {
     // Chrome は getComputedStyle で oklch()/lab()/color()/color-mix() を rgb() に
     // 正規化せず「書かれた記法のまま」返す。rgb() 前提の文字列解析だった頃は
