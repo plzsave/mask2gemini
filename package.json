@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "vendor": "bash scripts/copy-vendor.sh",
-    "test": "bun test extension/*.test.js",
+    "test": "bun test extension/*.test.js test/*.test.js",
     "test:e2e": "playwright test"
   },
   "dependencies": {
