@@ -42,3 +42,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Finder (MacOS) folder config
 .DS_Store
 .claude/settings.local.json*
+
+# エディタ設定・作図の下書き（ローカルに置くが追跡しない）
+.zed/
+docs/diagrams/
