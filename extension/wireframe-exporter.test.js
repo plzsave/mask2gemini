@@ -66,6 +66,33 @@ test("buildWireframe: 手動マスク（text なし）は矩形として出力�
   assert.equal(file.elements.filter((e) => e.type === "text").length, 0);
 });
 
+test("buildWireframe: 手動マスクと重なる kept の文字列を出力しない（Issue #64）", () => {
+  const file = buildWireframe({
+    masks: [{ x: 0, y: 0, w: 80, h: 20, source: "manual", reason: "manual" }],
+    kept: [
+      keptUnit("手動で隠した顧客名", 5, { w: 70 }),
+      keptUnit("残すラベル", 100, { w: 60 }),
+    ],
+  });
+  const json = JSON.stringify(file);
+  assert.ok(!json.includes("手動で隠した顧客名"));
+  assert.ok(json.includes("残すラベル"));
+});
+
+test("buildWireframe: 解除後に再マスクした revealed の文字列を出力しない（Issue #64）", () => {
+  const file = buildWireframe({
+    masks: [{ x: 0, y: 0, w: 80, h: 20, source: "manual", reason: "manual" }],
+    kept: [],
+    revealed: [
+      { x: 5, y: 2, w: 60, h: 15, reason: "proper-noun", text: "再び隠した氏名", source: "auto" },
+      { x: 100, y: 0, w: 60, h: 15, reason: "proper-noun", text: "解除したままの語", source: "auto" },
+    ],
+  });
+  const json = JSON.stringify(file);
+  assert.ok(!json.includes("再び隠した氏名"));
+  assert.ok(json.includes("解除したままの語"));
+});
+
 test("buildWireframe: opaque 由来のマスクは cross-hatch で塗り分けられる", () => {
   const file = buildWireframe({
     masks: [
