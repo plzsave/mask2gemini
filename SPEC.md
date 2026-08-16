@@ -78,6 +78,13 @@ mask2gemini/
 │                            package.sh（配布 zip 生成）、generate-icons.mjs（アイコン生成）、
 │                            capture-guide-shots.mjs（GUIDE 用スクリーンショット再生成）
 ├── GUIDE.html / guide/      非エンジニア向け利用ガイド（配布 zip に同梱。Issue #32）
+├── docs/m2g-schema.md       m2g メタデータ規約。消費側 LLM/Agent 向け（配布 zip に同梱。Issue #49）
+├── skills/m2g-wireframe/    ワイヤーフレームを実装資料として読む側の skill（Issue #68）。
+│                            SKILL.md ＋ summarize-wireframe.mjs（既存構造と提案差分の仕分け）。
+│                            配布 zip に同梱し、受け取ったエンジニアが自分の
+│                            プロジェクトの .claude/skills/ へコピーして使う。
+│                            語彙の正は docs/m2g-schema.md で、references/ へは
+│                            package.sh が配布時に複製する（リポジトリでは二重管理しない）
 ├── test/fixture.html        ダミー PII 入りのテストページ（E2E 用）
 ├── test/fixtures/           エッジケース別の追加フィクスチャ（下記）
 ├── test/e2e/mask.spec.js    Playwright E2E（拡張を実際に読み込み、実OCR と
