@@ -1,0 +1,20 @@
+[
+  {
+    "label": "excalidraw: watch → SVG (docs/diagrams)",
+    "command": "watchexec -e excalidraw -w docs/diagrams -- 'for f in docs/diagrams/*.excalidraw; do excalirender \"$f\" -o \"${f%.excalidraw}.svg\"; done'",
+    "reveal": "no_focus",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "excalidraw: render current file → SVG",
+    "command": "excalirender \"$ZED_FILE\" -o \"${ZED_FILE%.excalidraw}.svg\"",
+    "reveal": "no_focus"
+  },
+  {
+    "label": "excalidraw: live preview in browser (current file)",
+    "command": "excalirender watch \"$ZED_FILE\"",
+    "reveal": "no_focus",
+    "allow_concurrent_runs": false
+  }
+]

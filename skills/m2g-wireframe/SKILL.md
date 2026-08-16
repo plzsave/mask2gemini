@@ -151,9 +151,9 @@ Excalidraw で**既存要素を複製すると `customData` ごとコピーさ�
 
 ## 語彙の一覧
 
-`role` / `reason` / `kind` / `v` の全語彙と読み分け規約は、同梱の
-`references/m2g-schema.md` にある（リポジトリで作業している場合は
-`docs/m2g-schema.md`）。一覧に無い値に出会っても**無視せず**
+`role` / `reason` / `kind` / `v` の全語彙と読み分け規約は、この skill に同梱の
+`references/m2g-schema.md` にある（この skill だけをコピーしても付いてくる）。
+一覧に無い値に出会っても**無視せず**
 「そういう種別がある」として扱ってよい（前方互換のため、語彙の追加では
 スキーマバージョン `v` は上がらない）。
 
