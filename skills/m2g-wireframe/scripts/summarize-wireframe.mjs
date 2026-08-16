@@ -5,14 +5,19 @@
 // 「既存構造」と「人間が描き足した提案」の区別が埋もれる。この 2 つを
 // 分けて出すことがこのスクリプトの目的（SKILL.md「2 つの層」参照）。
 //
-// 使い方: node summarize-wireframe.mjs <file.excalidraw> [--json]
+// 使い方: node summarize-wireframe.mjs <file.excalidraw>
 // 依存なし・読み取りのみ。
+//
+// 出力は 1 種類（人間と LLM がそのまま読む文章）に絞ってある。機械可読な
+// JSON 出力も付けられるが、2 経路あると「片方にしか無い情報」が生まれ、
+// 実際にそれをやったところ複製検出の節が JSON 側から丸ごと欠けた。
+// 読む相手が LLM である以上、文章のほうが情報を落とさずに済む。
 
 import { readFileSync } from "node:fs";
 
-const [, , file, ...flags] = process.argv;
+const [, , file] = process.argv;
 if (!file) {
-  console.error("使い方: node summarize-wireframe.mjs <file.excalidraw> [--json]");
+  console.error("使い方: node summarize-wireframe.mjs <file.excalidraw>");
   process.exit(2);
 }
 
@@ -32,14 +37,38 @@ const blockOf = (e) => (e.groupIds ?? []).find((g) => g.startsWith("block-")) ??
 // 撮影された画面（role: "screen"）は必ず 1 枚・最背面。寸法と地色の基準になる
 const screen = elements.find((e) => roleOf(e) === "screen");
 
-// 列ヘッダの索引: 同じ tableId・同じ col の th/columnheader テキストが、
-// そのセルの見出し。マスク枠にどんなダミーを入れるかの最も確実な手がかり
-const headers = new Map();
+// 列ヘッダの索引: 同じ tableId・同じ col の見出しテキストが、そのセルの見出し。
+// マスク枠にどんなダミーを入れるかの最も確実な手がかり。
+//
+// 素朴に「kind が th/columnheader なら見出し」とすると 2 つ間違える:
+// 1. `<th scope="row">`（行見出し）も kind は "th" になる（dom-extractor の
+//    LABEL_TAGS はタグ名で判定するため）。行見出しは各データ行の col 0 に
+//    現れるので、そのまま索引に入れると本物の col 0 見出しを上書きする
+// 2. 見出しが自動マスクされて確認画面で解除された場合、role は "text" ではなく
+//    "revealed" になる（docs/m2g-schema.md: revealed は text と同様に扱ってよい）
+//
+// そこで「テーブルごとに、見出し候補のうち最も上の帯にあるものだけを列見出しと
+// する」ことで行見出しを除く。上下関係で判定するので、要素の並び順にも依存しない。
+const headerCandidates = new Map(); // tableId -> 候補要素[]
 for (const e of elements) {
   const m = m2g(e);
-  if (!m || m.role !== "text" || m.tableId === undefined || m.col === undefined) continue;
-  if (m.kind !== "th" && m.kind !== "columnheader" && m.kind !== "rowheader") continue;
-  headers.set(`${m.tableId}:${m.col}`, e.text);
+  if (!m || (m.role !== "text" && m.role !== "revealed")) continue;
+  if (m.tableId === undefined || m.col === undefined) continue;
+  if (m.kind !== "th" && m.kind !== "columnheader") continue;
+  if (!headerCandidates.has(m.tableId)) headerCandidates.set(m.tableId, []);
+  headerCandidates.get(m.tableId).push(e);
+}
+
+const headers = new Map();
+for (const [tableId, cands] of headerCandidates) {
+  const topY = Math.min(...cands.map((c) => c.y));
+  for (const c of cands) {
+    // 見出し行の帯（最上段の候補と縦に重なるもの）だけを列見出しとして採用する。
+    // 下の行に現れる行見出しはここで落ちる
+    if (c.y >= topY + Math.max(c.height, 1)) continue;
+    const key = `${tableId}:${m2g(c).col}`;
+    if (!headers.has(key)) headers.set(key, c.text);
+  }
 }
 const headerFor = (m) =>
   (m?.tableId === undefined || m?.col === undefined)
@@ -67,19 +96,18 @@ const describe = (e) => {
 
 const byPosition = (a, b) => (a.y - b.y) || (a.x - b.x);
 
-if (flags.includes("--json")) {
-  console.log(JSON.stringify({
-    screen: screen ? { w: screen.width, h: screen.height, bg: screen.backgroundColor } : null,
-    counts: extracted.reduce((acc, e) => {
-      acc[roleOf(e)] = (acc[roleOf(e)] ?? 0) + 1;
-      return acc;
-    }, {}),
-    proposals: proposals.map((e) => ({
-      type: e.type, x: e.x, y: e.y, w: e.width, h: e.height, text: e.text ?? null,
-    })),
-  }, null, 2));
-  process.exit(0);
-}
+// 矢印・線・コンテナの結び先（id 参照）を、読んで分かる説明に解決する。
+// 提案の矢印は「既存のどの要素に対する指示か」がすべてなので、
+// id のまま出しても意味がない
+const byId = new Map(elements.map((e) => [e.id, e]));
+const targetOf = (id) => {
+  const t = byId.get(id);
+  if (!t) return `(未解決の参照 ${id})`;
+  const m = m2g(t);
+  const where = `${t.type} ${pos(t)}`;
+  if (!m) return `提案要素: ${where}${t.text ? ` "${t.text}"` : ""}`;
+  return `既存要素: ${m.role} ${where} ${describe(t)}`;
+};
 
 console.log(`ファイル: ${file}`);
 if (screen) {
@@ -93,12 +121,20 @@ if (screen) {
 // --- 提案差分（先に出す。ここが実装すべきもの） ---
 console.log(`\n=== 実装すべき差分（customData 無し）: ${proposals.length} 要素 ===`);
 if (proposals.length === 0) {
-  console.log("差分なし。このファイルはまだ編集されていない撮影直後の状態と思われる。");
-  console.log("実装に入る前に、変更提案が含まれていないことを依頼者に確認すること。");
+  console.log("新規に描き足された要素は無い。ただし削除・移動・複製による提案は"
+    + "この方法では検出できないので、「提案が無い」と断定はできない。");
+  console.log("実装に入る前に、下の構造の要約を示して依頼者に確認すること。");
 } else {
   for (const e of [...proposals].sort(byPosition)) {
     const label = e.text ? ` "${e.text}"` : "";
     console.log(`  ${e.type.padEnd(9)} ${pos(e)} ${size(e)}${label}`);
+    // 矢印・線は「どこからどこへ」に意味がある。bbox だけを出すと
+    // 「この要素をここへ移せ」という指示が読めなくなるので、
+    // 結びついている相手を解決して見せる
+    for (const [side, b] of [["始点", e.startBinding], ["終点", e.endBinding]]) {
+      if (b?.elementId) console.log(`      ${side} → ${targetOf(b.elementId)}`);
+    }
+    if (e.containerId) console.log(`      所属 → ${targetOf(e.containerId)}`);
   }
   console.log("\n注: 座標・寸法は配置の見当をつけるためのもので、規範ではない"
     + "（SKILL.md「何が規範で、何が規範でないか」参照）。");
