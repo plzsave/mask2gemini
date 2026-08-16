@@ -136,6 +136,36 @@ for (const [key, items] of ordered) {
   }
 }
 
+// テーブルの列ごとのデータ枠の数。
+// Excalidraw で既存要素を複製した提案は customData ごとコピーされるため、
+// 「customData の有無」では差分に現れない（SKILL.md「この見分け方が効かない場合」）。
+// 複製を機械的に見分けることはできないので、代わりに数を見せて人に確認させる
+const cells = extracted.filter((e) => {
+  const m = m2g(e);
+  return m?.role === "masked" && m.tableId !== undefined && m.col !== undefined;
+});
+if (cells.length) {
+  const perTable = new Map();
+  for (const e of cells) {
+    const m = m2g(e);
+    if (!perTable.has(m.tableId)) perTable.set(m.tableId, new Map());
+    const cols = perTable.get(m.tableId);
+    cols.set(m.col, (cols.get(m.col) ?? 0) + 1);
+  }
+  console.log("\n--- テーブルの列ごとのデータ枠の数（依頼者への確認用）---");
+  for (const [tableId, cols] of [...perTable.entries()].sort((a, b) => a[0] - b[0])) {
+    console.log(`table ${tableId}:`);
+    for (const [col, n] of [...cols.entries()].sort((a, b) => a[0] - b[0])) {
+      const h = headers.get(`${tableId}:${col}`);
+      console.log(`  col ${col} ${h ? `"${h}"` : "(見出し不明)"}: ${n} 枠`);
+    }
+  }
+  console.log("注: マスクはトークン単位なので 1 セルが複数の枠に割れることがある。"
+    + "枠の数は行数ではない。");
+  console.log("注: 複製ベースで追加された提案はメタデータを引き継ぐため、"
+    + "差分として自動検出できない。この数が意図どおりかを依頼者に確認すること。");
+}
+
 // 装飾（配色の根拠）。個々の矩形ではなく色の分布として出す
 const decor = extracted.filter((e) => roleOf(e) === "decor");
 if (decor.length) {
